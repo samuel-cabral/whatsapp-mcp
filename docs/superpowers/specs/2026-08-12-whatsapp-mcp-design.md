@@ -109,7 +109,7 @@ ameaça para uso pessoal.
 |---|---|
 | `chats` | `jid` PK, nome, `is_group`, `last_message_at`, `unread_count`, `archived` |
 | `contacts` | `jid` PK, nome, `push_name` |
-| `messages` | PK `(chat_jid, msg_id)`, `sender_jid`, `from_me`, `timestamp`, `type`, `text`, `quoted_id` |
+| `messages` | `id` PK autoincrement, `UNIQUE (chat_jid, msg_id)`, `sender_jid`, `from_me`, `timestamp`, `type`, `text`, `quoted_id` |
 | `messages_fts` | FTS5 externo sobre `messages.text` |
 | `sync_state` | por chat: `oldest_msg_id`, `oldest_ts`, `complete` |
 | `meta` | `schema_version`, `initial_sync_done`, `last_connected_at` |
@@ -126,8 +126,8 @@ depois, se fizer falta.
 1. Daemon sobe, lê `auth/`. Sem credenciais, imprime o QR no terminal para pareamento
 2. Conecta com `syncFullHistory: true`; `messaging-history.set` chega em lotes e é gravado
    em transação. `meta.initial_sync_done` só vira verdadeiro no lote com `isLatest`
-3. `messages.upsert` ao vivo usa o mesmo caminho de ingest. Idempotente pela PK, então
-   reprocessar não duplica
+3. `messages.upsert` ao vivo usa o mesmo caminho de ingest. Idempotente pela chave única
+   `(chat_jid, msg_id)`, então reprocessar não duplica
 4. `backfill_chat` faz o daemon paginar `fetchMessageHistory` de 50 em 50, atualizando
    `sync_state` a cada página
 5. Envio, em dois passos, descrito abaixo
