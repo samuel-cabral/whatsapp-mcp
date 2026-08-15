@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { migrate, type DB } from "../src/shared/migrations.js";
-import { ingestMessages, ingestChats, ingestContacts, setMeta, getMeta } from "../src/daemon/ingest.js";
+import {
+  ingestMessages,
+  ingestChats,
+  ingestContacts,
+  ingestGroupSubjects,
+  setMeta,
+  getMeta,
+} from "../src/daemon/ingest.js";
 
 let db: DB;
 beforeEach(() => {
@@ -48,6 +55,71 @@ describe("ingestMessages", () => {
     const s = db.prepare("SELECT * FROM sync_state WHERE chat_jid = ?").get("5511999999999@s.whatsapp.net") as any;
     expect(s.oldest_msg_id).toBe("A");
     expect(s.oldest_ts).toBe(1000);
+  });
+});
+
+describe("pushName vindo das mensagens", () => {
+  const CONTATO = "5511999999999@s.whatsapp.net";
+  const GRUPO = "12345-67890@g.us";
+
+  it("aprende o nome de quem manda mensagem direta", () => {
+    ingestMessages(db, [{ ...msg("A", "oi"), pushName: "Igor" }]);
+    const c = db.prepare("SELECT push_name FROM contacts WHERE jid = ?").get(CONTATO) as any;
+    expect(c.push_name).toBe("Igor");
+  });
+
+  it("aprende o nome do participante de grupo, não o do grupo", () => {
+    ingestMessages(db, [
+      {
+        key: { remoteJid: GRUPO, fromMe: false, id: "G1", participant: "5511@s.whatsapp.net" },
+        messageTimestamp: 1754000000,
+        message: { conversation: "bom dia" },
+        pushName: "Rebeka",
+      },
+    ]);
+    const p = db.prepare("SELECT push_name FROM contacts WHERE jid = ?").get("5511@s.whatsapp.net") as any;
+    expect(p.push_name).toBe("Rebeka");
+    expect(db.prepare("SELECT 1 FROM contacts WHERE jid = ?").get(GRUPO)).toBeUndefined();
+  });
+
+  it("ignora pushName das próprias mensagens e o vazio", () => {
+    ingestMessages(db, [
+      { ...msg("A", "oi"), key: { remoteJid: CONTATO, fromMe: true, id: "A" }, pushName: "Samuel" },
+      { ...msg("B", "oi"), pushName: "   " },
+    ]);
+    expect(db.prepare("SELECT count(*) AS n FROM contacts").get()).toEqual({ n: 0 });
+  });
+
+  it("não sobrescreve o nome da agenda, que é mais confiável", () => {
+    ingestContacts(db, [{ id: CONTATO, name: "Igor Sousa" }]);
+    ingestMessages(db, [{ ...msg("A", "oi"), pushName: "igorzin 🔥" }]);
+    const c = db.prepare("SELECT name, push_name FROM contacts WHERE jid = ?").get(CONTATO) as any;
+    expect(c.name).toBe("Igor Sousa");
+    expect(c.push_name).toBe("igorzin 🔥");
+  });
+});
+
+describe("ingestGroupSubjects", () => {
+  it("grava o subject como nome do chat", () => {
+    expect(ingestGroupSubjects(db, [{ id: "12345-67890@g.us", subject: "Grupo da Igreja" }])).toBe(1);
+    const c = db.prepare("SELECT name, is_group FROM chats WHERE jid = ?").get("12345-67890@g.us") as any;
+    expect(c.name).toBe("Grupo da Igreja");
+    expect(c.is_group).toBe(1);
+  });
+
+  it("preserva unread_count, que o metadata de grupo não carrega", () => {
+    ingestChats(db, [{ id: "12345-67890@g.us", unreadCount: 7 }]);
+    ingestGroupSubjects(db, [{ id: "12345-67890@g.us", subject: "Grupo da Igreja" }]);
+    const c = db.prepare("SELECT name, unread_count FROM chats WHERE jid = ?").get("12345-67890@g.us") as any;
+    expect(c.name).toBe("Grupo da Igreja");
+    expect(c.unread_count).toBe(7);
+  });
+
+  it("ignora update parcial sem subject em vez de apagar o nome", () => {
+    ingestGroupSubjects(db, [{ id: "12345-67890@g.us", subject: "Grupo da Igreja" }]);
+    expect(ingestGroupSubjects(db, [{ id: "12345-67890@g.us", announce: true }])).toBe(0);
+    const c = db.prepare("SELECT name FROM chats WHERE jid = ?").get("12345-67890@g.us") as any;
+    expect(c.name).toBe("Grupo da Igreja");
   });
 });
 

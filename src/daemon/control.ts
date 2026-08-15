@@ -20,7 +20,14 @@ const fail = (error: string): ControlResponse => ({ ok: false, error });
 const done = (result: unknown): ControlResponse => ({ ok: true, result });
 
 function chatName(db: DB, jid: string): string | null | undefined {
-  const row = db.prepare("SELECT name FROM chats WHERE jid = ?").get(jid) as { name: string | null } | undefined;
+  const row = db
+    .prepare(`
+      SELECT COALESCE(c.name, ct.name, ct.push_name) AS name
+        FROM chats c
+        LEFT JOIN contacts ct ON ct.jid = c.jid
+       WHERE c.jid = ?
+    `)
+    .get(jid) as { name: string | null } | undefined;
   return row ? row.name : undefined;
 }
 

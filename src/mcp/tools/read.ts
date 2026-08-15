@@ -54,7 +54,8 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       const msgs = readMessages(ctx.db, args);
       if (msgs.length === 0) return text(`Nenhuma mensagem em ${args.jid} nesse intervalo.` + syncNote(ctx.db));
       const lines = msgs.map(
-        (m) => `[${when(m.at)}] ${m.fromMe ? "eu" : (m.sender ?? args.jid)}: ${m.text ?? `(${m.type})`}`,
+        (m) =>
+          `[${when(m.at)}] ${m.fromMe ? "eu" : (m.senderName ?? m.sender ?? args.jid)}: ${m.text ?? `(${m.type})`}`,
       );
       return text(lines.join("\n") + syncNote(ctx.db));
     },
