@@ -15,9 +15,17 @@ export interface MessageView {
   at: number;
   fromMe: boolean;
   sender: string | null;
+  senderName: string | null;
   type: string;
   text: string | null;
 }
+
+/**
+ * Three sources of a name, in descending trustworthiness: the address book name
+ * synced from the phone, the same name as WhatsApp echoes it, and the display
+ * name the person chose for themselves. Any of them beats showing a raw jid.
+ */
+const NAME = "COALESCE(ct.name, ct.push_name)";
 
 export type SearchHit = MessageView & { chatJid: string; chatName: string | null };
 
@@ -37,11 +45,13 @@ function sanitizeFtsQuery(raw: string): string {
 export function listChats(db: DB, opts: { limit?: number; onlyUnread?: boolean }): ChatSummary[] {
   const rows = db
     .prepare(`
-      SELECT c.jid, c.name, c.is_group, c.unread_count, c.last_message_at,
+      SELECT c.jid, COALESCE(c.name, ${NAME}) AS name,
+             c.is_group, c.unread_count, c.last_message_at,
              (SELECT m.text FROM messages m
                WHERE m.chat_jid = c.jid
                ORDER BY m.timestamp DESC LIMIT 1) AS last_text
         FROM chats c
+        LEFT JOIN contacts ct ON ct.jid = c.jid
        WHERE (@onlyUnread = 0 OR c.unread_count > 0)
        ORDER BY COALESCE(c.last_message_at, 0) DESC
        LIMIT @limit
@@ -66,12 +76,14 @@ export function readMessages(
   // chronological order, which is how a reader expects to see a conversation.
   const rows = db
     .prepare(`
-      SELECT msg_id, timestamp, from_me, sender_jid, type, text
-        FROM messages
-       WHERE chat_jid = @jid
-         AND (@since IS NULL OR timestamp >= @since)
-         AND (@until IS NULL OR timestamp <= @until)
-       ORDER BY timestamp DESC
+      SELECT m.msg_id, m.timestamp, m.from_me, m.sender_jid, m.type, m.text,
+             ${NAME} AS sender_name
+        FROM messages m
+        LEFT JOIN contacts ct ON ct.jid = m.sender_jid
+       WHERE m.chat_jid = @jid
+         AND (@since IS NULL OR m.timestamp >= @since)
+         AND (@until IS NULL OR m.timestamp <= @until)
+       ORDER BY m.timestamp DESC
        LIMIT @limit
     `)
     .all({
@@ -87,6 +99,7 @@ export function readMessages(
       at: r.timestamp,
       fromMe: r.from_me === 1,
       sender: r.sender_jid,
+      senderName: r.sender_name,
       type: r.type,
       text: r.text,
     }))
@@ -100,10 +113,14 @@ export function searchMessages(
   const rows = db
     .prepare(`
       SELECT m.msg_id, m.timestamp, m.from_me, m.sender_jid, m.type, m.text,
-             m.chat_jid, c.name AS chat_name
+             m.chat_jid,
+             COALESCE(c.name, cc.name, cc.push_name) AS chat_name,
+             COALESCE(sc.name, sc.push_name) AS sender_name
         FROM messages_fts f
         JOIN messages m ON m.id = f.rowid
         LEFT JOIN chats c ON c.jid = m.chat_jid
+        LEFT JOIN contacts cc ON cc.jid = m.chat_jid
+        LEFT JOIN contacts sc ON sc.jid = m.sender_jid
        WHERE messages_fts MATCH @q
          AND (@jid IS NULL OR m.chat_jid = @jid)
          AND (@since IS NULL OR m.timestamp >= @since)
@@ -122,6 +139,7 @@ export function searchMessages(
     at: r.timestamp,
     fromMe: r.from_me === 1,
     sender: r.sender_jid,
+    senderName: r.sender_name,
     type: r.type,
     text: r.text,
     chatJid: r.chat_jid,

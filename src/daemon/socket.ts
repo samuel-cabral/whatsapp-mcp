@@ -6,7 +6,7 @@ import makeWASocket, {
 import type { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import type { DB } from "../shared/migrations.js";
-import { ingestMessages, ingestChats, ingestContacts, setMeta } from "./ingest.js";
+import { ingestMessages, ingestChats, ingestContacts, ingestGroupSubjects, setMeta } from "./ingest.js";
 import { planBackfill } from "./backfill.js";
 import type { Sender } from "./control.js";
 
@@ -33,6 +33,22 @@ export async function createConnection(opts: {
   let closing = false;
   let backoffMs = 1_000;
 
+  /**
+   * Group subjects never come down the history sync — only the participant list
+   * does — so the only way to learn them is to ask once the socket is up.
+   * Failure here is not fatal: it costs names, not messages.
+   */
+  const syncGroupSubjects = async (): Promise<void> => {
+    try {
+      const all = await sock.groupFetchAllParticipating();
+      const n = ingestGroupSubjects(db, Object.values(all ?? {}));
+      console.error(`[whatsapp-daemon] nome de ${n} grupos atualizado.`);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      console.error(`[whatsapp-daemon] não deu para buscar o nome dos grupos: ${why}`);
+    }
+  };
+
   const start = (): void => {
     sock = makeWASocket({ auth: state, syncFullHistory: true });
 
@@ -47,6 +63,7 @@ export async function createConnection(opts: {
         backoffMs = 1_000;
         setMeta(db, "last_connected_at", String(Math.floor(Date.now() / 1000)));
         console.error("[whatsapp-daemon] conectado.");
+        void syncGroupSubjects();
       }
       if (u.connection === "close") {
         connected = false;
@@ -76,6 +93,12 @@ export async function createConnection(opts: {
 
     sock.ev.on("chats.upsert", (chats) => ingestChats(db, chats ?? []));
     sock.ev.on("contacts.upsert", (contacts) => ingestContacts(db, contacts ?? []));
+    // upsert only fires for contacts we have never seen; update is where the
+    // address book actually lands, and it arrives as a partial — which is why
+    // ingestContacts coalesces instead of overwriting with null.
+    sock.ev.on("contacts.update", (updates) => ingestContacts(db, updates ?? []));
+    sock.ev.on("groups.upsert", (groups) => ingestGroupSubjects(db, groups ?? []));
+    sock.ev.on("groups.update", (groups) => ingestGroupSubjects(db, groups ?? []));
   };
 
   start();

@@ -41,6 +41,31 @@ describe("listChats", () => {
   it("respeita o limite", () => {
     expect(listChats(db, { limit: 1 })).toHaveLength(1);
   });
+
+  it("cai no push_name quando o chat não tem nome", () => {
+    const ZE = "5585777@s.whatsapp.net";
+    ingestMessages(db, [
+      { key: { remoteJid: ZE, fromMe: false, id: "Z1" }, messageTimestamp: 4000, message: { conversation: "e aí" }, pushName: "Zé" },
+    ]);
+    expect(listChats(db, {})[0]).toMatchObject({ jid: ZE, name: "Zé" });
+  });
+});
+
+describe("nome de quem enviou", () => {
+  it("read_messages resolve o participante do grupo pelo contato", () => {
+    const msgs = readMessages(db, { jid: GRUPO });
+    expect(msgs[0]).toMatchObject({ sender: IGOR, senderName: "Igor" });
+  });
+
+  it("fica null para mensagem minha, que não tem remetente", () => {
+    const minha = readMessages(db, { jid: IGOR }).find((m) => m.fromMe);
+    expect(minha?.senderName).toBeNull();
+  });
+
+  it("search_messages traz o nome do chat e de quem enviou", () => {
+    const [hit] = searchMessages(db, { query: "ensaio" });
+    expect(hit).toMatchObject({ chatName: "Grupo da Igreja", senderName: "Igor" });
+  });
 });
 
 describe("readMessages", () => {

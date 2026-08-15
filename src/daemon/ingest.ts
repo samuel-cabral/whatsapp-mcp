@@ -31,6 +31,16 @@ export function ingestMessages(db: DB, messages: unknown[]): number {
       oldest_ts     = MIN(sync_state.oldest_ts, excluded.oldest_ts)
   `);
 
+  // The address book only reaches us through contact events, which WhatsApp is
+  // stingy about. Every inbound message, on the other hand, carries the sender's
+  // self-chosen display name — including group participants we have no contact
+  // row for. Harvesting it here is what keeps the store from being all jids.
+  const learnPushName = db.prepare(`
+    INSERT INTO contacts (jid, push_name)
+    VALUES (@jid, @push_name)
+    ON CONFLICT (jid) DO UPDATE SET push_name = excluded.push_name
+  `);
+
   const run = db.transaction((batch: unknown[]) => {
     let written = 0;
     for (const raw of batch) {
@@ -39,6 +49,11 @@ export function ingestMessages(db: DB, messages: unknown[]): number {
       insertMsg.run(row);
       touchChat.run({ jid: row.chat_jid, is_group: isGroupJid(row.chat_jid) ? 1 : 0, ts: row.timestamp });
       touchSync.run({ jid: row.chat_jid, msg_id: row.msg_id, ts: row.timestamp });
+
+      const pushName = (raw as any)?.pushName;
+      if (row.sender_jid && !row.from_me && typeof pushName === "string" && pushName.trim() !== "") {
+        learnPushName.run({ jid: row.sender_jid, push_name: pushName.trim() });
+      }
       written++;
     }
     return written;
@@ -79,6 +94,32 @@ export function ingestChats(db: DB, chats: unknown[]): number {
   return run(chats);
 }
 
+/**
+ * Group subjects arrive from groupFetchAllParticipating and groups.update, whose
+ * payloads carry no unread or archived state. Routing them through ingestChats
+ * would write those columns back as zero, so this stays deliberately narrower.
+ */
+export function ingestGroupSubjects(db: DB, groups: unknown[]): number {
+  const stmt = db.prepare(`
+    INSERT INTO chats (jid, name, is_group)
+    VALUES (@jid, @name, 1)
+    ON CONFLICT (jid) DO UPDATE SET name = COALESCE(excluded.name, chats.name)
+  `);
+
+  const run = db.transaction((batch: unknown[]) => {
+    let n = 0;
+    for (const raw of batch) {
+      const g = raw as any;
+      if (!g?.id || typeof g.subject !== "string" || g.subject === "") continue;
+      stmt.run({ jid: normalizeJid(g.id), name: g.subject });
+      n++;
+    }
+    return n;
+  });
+
+  return run(groups);
+}
+
 export function ingestContacts(db: DB, contacts: unknown[]): number {
   const stmt = db.prepare(`
     INSERT INTO contacts (jid, name, push_name)
@@ -95,7 +136,7 @@ export function ingestContacts(db: DB, contacts: unknown[]): number {
       if (!c?.id) continue;
       stmt.run({
         jid: normalizeJid(c.id),
-        name: c.name ?? null,
+        name: c.name ?? c.verifiedName ?? null,
         push_name: c.notify ?? null,
       });
       n++;
