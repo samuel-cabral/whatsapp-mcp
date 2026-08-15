@@ -7,8 +7,14 @@
     "whatsapp-mcp": "./build/mcp/index.js",
     "whatsapp-daemon": "./build/daemon/index.js"
   },
-  "files": ["build", "README.md", "LICENSE"],
-  "engines": { "node": ">=22" },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "rm -rf build && tsc && cp src/shared/schema.sql build/shared/schema.sql && chmod +x build/mcp/index.js build/daemon/index.js",
     "typecheck": "tsc --noEmit",
@@ -19,7 +25,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@whiskeysockets/baileys": "6.7.24",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^11.10.0",
     "qrcode-terminal": "^0.12.0",
     "zod": "^3.25.0"
   },
