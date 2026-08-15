@@ -23,6 +23,7 @@
     "daemon": "node build/daemon/index.js"
   },
   "dependencies": {
+    "@hapi/boom": "^10.0.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@whiskeysockets/baileys": "6.7.24",
     "better-sqlite3": "^11.10.0",
