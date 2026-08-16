@@ -74,7 +74,8 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       const hits = searchMessages(ctx.db, args);
       if (hits.length === 0) return text(`Nada encontrado para "${args.query}".` + syncNote(ctx.db));
       const lines = hits.map(
-        (h) => `[${when(h.at)}] ${h.chatName ?? h.chatJid} — ${h.fromMe ? "eu" : "eles"}: ${h.text ?? `(${h.type})`}`,
+        (h) =>
+          `[${when(h.at)}] ${h.chatName ?? h.chatJid} — ${h.fromMe ? "eu" : (h.senderName ?? "eles")}: ${h.text ?? `(${h.type})`}`,
       );
       return text(lines.join("\n") + syncNote(ctx.db));
     },
