@@ -1,6 +1,6 @@
 import type { DB } from "../shared/migrations.js";
 import { toMessageRow } from "../shared/normalize.js";
-import { normalizeJid, isGroupJid } from "../shared/jid.js";
+import { normalizeJid, isGroupJid, isUserJid } from "../shared/jid.js";
 
 /**
  * Every write goes through ON CONFLICT so that replaying a history batch — which
@@ -50,8 +50,17 @@ export function ingestMessages(db: DB, messages: unknown[]): number {
       touchChat.run({ jid: row.chat_jid, is_group: isGroupJid(row.chat_jid) ? 1 : 0, ts: row.timestamp });
       touchSync.run({ jid: row.chat_jid, msg_id: row.msg_id, ts: row.timestamp });
 
+      // isUserJid matters because in a 1:1 the sender IS the chat: without it,
+      // status@broadcast learns the name of whoever posted and the status feed
+      // starts showing up in the chat list as if it were a person.
       const pushName = (raw as any)?.pushName;
-      if (row.sender_jid && !row.from_me && typeof pushName === "string" && pushName.trim() !== "") {
+      if (
+        row.sender_jid &&
+        isUserJid(row.sender_jid) &&
+        !row.from_me &&
+        typeof pushName === "string" &&
+        pushName.trim() !== ""
+      ) {
         learnPushName.run({ jid: row.sender_jid, push_name: pushName.trim() });
       }
       written++;

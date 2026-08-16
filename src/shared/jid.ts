@@ -13,3 +13,13 @@ export function normalizeJid(jid: string): string {
 export function isGroupJid(jid: string): boolean {
   return jid.endsWith("@g.us");
 }
+
+/**
+ * WhatsApp routes things that are not people through the same message pipeline:
+ * the status feed, newsletters, bots. They carry a pushName like anyone else, so
+ * whoever learns names from messages has to exclude them — otherwise the status
+ * feed shows up in the chat list wearing some stranger's name.
+ */
+export function isUserJid(jid: string): boolean {
+  return jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid");
+}

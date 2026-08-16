@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeJid, isGroupJid } from "../src/shared/jid.js";
+import { normalizeJid, isGroupJid, isUserJid } from "../src/shared/jid.js";
 import { toMessageRow } from "../src/shared/normalize.js";
 
 describe("normalizeJid", () => {
@@ -74,5 +74,19 @@ describe("toMessageRow", () => {
     const row = toMessageRow({ ...base, message: { protocolMessage: { type: 0 } } })!;
     expect(row.type).toBe("other");
     expect(row.text).toBeNull();
+  });
+});
+
+describe("isUserJid", () => {
+  it("aceita pessoa em @s.whatsapp.net e em @lid", () => {
+    expect(isUserJid("5511999999999@s.whatsapp.net")).toBe(true);
+    expect(isUserJid("42700665520139@lid")).toBe(true);
+  });
+
+  it("recusa grupo e os pseudo-jids que carregam pushName mas não são gente", () => {
+    expect(isUserJid("12345-67890@g.us")).toBe(false);
+    expect(isUserJid("status@broadcast")).toBe(false);
+    expect(isUserJid("12345@newsletter")).toBe(false);
+    expect(isUserJid("12345@bot")).toBe(false);
   });
 });

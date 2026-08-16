@@ -90,6 +90,31 @@ describe("pushName vindo das mensagens", () => {
     expect(db.prepare("SELECT count(*) AS n FROM contacts").get()).toEqual({ n: 0 });
   });
 
+  it("ignora pseudo-jid: o feed de status não vira contato", () => {
+    ingestMessages(db, [
+      {
+        key: { remoteJid: "status@broadcast", fromMe: false, id: "S1" },
+        messageTimestamp: 1754000000,
+        message: { conversation: "story" },
+        pushName: "Degust",
+      },
+    ]);
+    expect(db.prepare("SELECT 1 FROM contacts WHERE jid = ?").get("status@broadcast")).toBeUndefined();
+  });
+
+  it("aprende de jid @lid, que é como o WhatsApp endereça hoje", () => {
+    ingestMessages(db, [
+      {
+        key: { remoteJid: "42700665520139@lid", fromMe: false, id: "L1" },
+        messageTimestamp: 1754000000,
+        message: { conversation: "oi" },
+        pushName: "Glaucia",
+      },
+    ]);
+    const c = db.prepare("SELECT push_name FROM contacts WHERE jid = ?").get("42700665520139@lid") as any;
+    expect(c.push_name).toBe("Glaucia");
+  });
+
   it("não sobrescreve o nome da agenda, que é mais confiável", () => {
     ingestContacts(db, [{ id: CONTATO, name: "Igor Sousa" }]);
     ingestMessages(db, [{ ...msg("A", "oi"), pushName: "igorzin 🔥" }]);
