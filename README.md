@@ -35,7 +35,7 @@ npm run build
 node build/daemon/index.js
 
 # 2. Wait for the initial history sync (watch the "history: +N" log lines;
-#    "(último lote)" marks the end).
+#    they carry a percentage, and "(sync inicial completo)" marks the end).
 
 # 3. Check it from another terminal:
 printf '{"cmd":"status"}\n' | nc -U ~/.whatsapp-mcp/control.sock

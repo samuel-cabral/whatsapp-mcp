@@ -4,6 +4,8 @@ import { migrate, type DB } from "../src/shared/migrations.js";
 import {
   ingestMessages,
   ingestChats,
+  ingestChatUpdates,
+  recordHistoryProgress,
   ingestContacts,
   ingestGroupSubjects,
   setMeta,
@@ -177,5 +179,104 @@ describe("meta", () => {
     expect(getMeta(db, "initial_sync_done")).toBeNull();
     setMeta(db, "initial_sync_done", "1");
     expect(getMeta(db, "initial_sync_done")).toBe("1");
+  });
+});
+
+describe("ingestChatUpdates — unread_count", () => {
+  const seed = (jid: string, unread: number) =>
+    ingestChats(db, [{ id: jid, name: "Fulano", unreadCount: unread }]);
+
+  it("incrementa quando o delta é positivo", () => {
+    seed("5511@s.whatsapp.net", 2);
+    ingestChatUpdates(db, [{ id: "5511@s.whatsapp.net", unreadCount: 3 }]);
+    const r = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5511@s.whatsapp.net") as any;
+    expect(r.u).toBe(5);
+  });
+
+  it("decrementa quando o delta é negativo, sem passar de zero", () => {
+    seed("5522@s.whatsapp.net", 1);
+    ingestChatUpdates(db, [{ id: "5522@s.whatsapp.net", unreadCount: -4 }]);
+    const r = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5522@s.whatsapp.net") as any;
+    expect(r.u).toBe(0);
+  });
+
+  it("zera quando unreadCount vem null (chat marcado como lido)", () => {
+    seed("5533@s.whatsapp.net", 7);
+    ingestChatUpdates(db, [{ id: "5533@s.whatsapp.net", unreadCount: null }]);
+    const r = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5533@s.whatsapp.net") as any;
+    expect(r.u).toBe(0);
+  });
+
+  it("não mexe no contador quando o update não traz unreadCount", () => {
+    seed("5544@s.whatsapp.net", 3);
+    ingestChatUpdates(db, [{ id: "5544@s.whatsapp.net", archived: true }]);
+    const r = db.prepare("SELECT unread_count AS u, archived AS a FROM chats WHERE jid = ?").get("5544@s.whatsapp.net") as any;
+    expect(r.u).toBe(3);
+    expect(r.a).toBe(1);
+  });
+
+  it("ignora unreadCount não numérico sem derrubar o resto do lote", () => {
+    seed("5588@s.whatsapp.net", 3);
+    seed("5599@s.whatsapp.net", 1);
+    ingestChatUpdates(db, [
+      { id: "5588@s.whatsapp.net", unreadCount: "lixo" },
+      { id: "5599@s.whatsapp.net", unreadCount: 2 },
+    ]);
+    const a = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5588@s.whatsapp.net") as any;
+    const b = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5599@s.whatsapp.net") as any;
+    expect(a.u).toBe(3); // preservado, não corrompido
+    expect(b.u).toBe(3); // e o vizinho no mesmo lote não foi revertido
+  });
+
+  it("não cria chat a partir de um update de chat desconhecido", () => {
+    ingestChatUpdates(db, [{ id: "5555@s.whatsapp.net", unreadCount: 2 }]);
+    const n = db.prepare("SELECT count(*) AS n FROM chats").get() as any;
+    expect(n.n).toBe(0);
+  });
+
+  it("preserva o nome já conhecido quando o update o omite", () => {
+    seed("5566@s.whatsapp.net", 0);
+    ingestChatUpdates(db, [{ id: "5566@s.whatsapp.net", unreadCount: 1 }]);
+    const r = db.prepare("SELECT name AS n FROM chats WHERE jid = ?").get("5566@s.whatsapp.net") as any;
+    expect(r.n).toBe("Fulano");
+  });
+});
+
+describe("ingestChats — não zera estado ausente", () => {
+  it("um upsert sem unreadCount não apaga o contador existente", () => {
+    ingestChats(db, [{ id: "5577@s.whatsapp.net", name: "Fulano", unreadCount: 4 }]);
+    ingestChats(db, [{ id: "5577@s.whatsapp.net", name: "Fulano" }]);
+    const r = db.prepare("SELECT unread_count AS u FROM chats WHERE jid = ?").get("5577@s.whatsapp.net") as any;
+    expect(r.u).toBe(4);
+  });
+});
+
+describe("recordHistoryProgress", () => {
+  it("não marca o sync como completo enquanto progress não chega a 100", () => {
+    recordHistoryProgress(db, { progress: 40 });
+    recordHistoryProgress(db, { progress: 99 });
+    expect(getMeta(db, "initial_sync_done")).toBeNull();
+  });
+
+  it("ignora lotes sem progress, que é o caso da maioria deles", () => {
+    recordHistoryProgress(db, { progress: null });
+    recordHistoryProgress(db, {});
+    expect(getMeta(db, "initial_sync_done")).toBeNull();
+  });
+
+  it("marca completo quando progress chega a 100", () => {
+    expect(recordHistoryProgress(db, { progress: 100 })).toBe(true);
+    expect(getMeta(db, "initial_sync_done")).toBe("1");
+  });
+
+  it("não desmarca quando um lote atrasado chega depois do 100", () => {
+    recordHistoryProgress(db, { progress: 100 });
+    recordHistoryProgress(db, { progress: 12 });
+    expect(getMeta(db, "initial_sync_done")).toBe("1");
+  });
+
+  it("isLatest sozinho não marca nada: no Baileys ele é o primeiro lote, não o último", () => {
+    recordHistoryProgress(db, { progress: null, isLatest: true } as any);
+    expect(getMeta(db, "initial_sync_done")).toBeNull();
   });
 });
