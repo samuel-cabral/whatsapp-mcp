@@ -1,3 +1,4 @@
+import type { InboundAssessment } from "./health.js";
 export type MessageType =
   | "text" | "image" | "video" | "audio"
   | "document" | "sticker" | "location" | "contact" | "other";
@@ -34,6 +35,11 @@ export interface SyncStatus {
   messageCount: number;
   chatCount: number;
   lastConnectedAt: number | null;
+  /** Newest message we actually received and could read. */
+  lastInboundAt: number | null;
+  /** Wall clock of the last inbound write — diverges from lastInboundAt when a backlog drains. */
+  lastInboundIngestAt: number | null;
+  inbound: InboundAssessment;
 }
 
 /** Commands accepted by the daemon's control socket. */

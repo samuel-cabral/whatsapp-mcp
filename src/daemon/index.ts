@@ -21,7 +21,13 @@ async function main(): Promise<void> {
 
   const server = await startControlServer({
     socketFile: paths.socketFile,
-    deps: { db, drafts, sender: conn, connected: () => conn.isConnected() },
+    deps: {
+      db,
+      drafts,
+      sender: conn,
+      connected: () => conn.isConnected(),
+      health: () => conn.health(),
+    },
   });
 
   console.error(`[whatsapp-daemon] ouvindo em ${paths.socketFile}`);

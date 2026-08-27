@@ -1,3 +1,4 @@
+import { assessInbound, type InboundHealth } from "../shared/health.js";
 import type { DB } from "../shared/migrations.js";
 import type { ContactRow, SyncStatus } from "../shared/types.js";
 
@@ -167,16 +168,39 @@ export function getContact(db: DB, query: string): ContactRow[] {
     .all({ like: `%${query}%` }) as ContactRow[];
 }
 
-export function getSyncStatus(db: DB, connected: boolean): SyncStatus {
+/**
+ * `connected` alone was the whole health story here, and it is the field that
+ * stayed green through a 47-hour outage. The inbound verdict exists so the status
+ * can say no.
+ */
+export function getSyncStatus(db: DB, connected: boolean, health?: InboundHealth): SyncStatus {
   const m = db.prepare("SELECT count(*) AS n FROM messages").get() as any;
   const c = db.prepare("SELECT count(*) AS n FROM chats").get() as any;
   const done = db.prepare("SELECT value FROM meta WHERE key = 'initial_sync_done'").get() as any;
   const last = db.prepare("SELECT value FROM meta WHERE key = 'last_connected_at'").get() as any;
+  const ingest = db.prepare("SELECT value FROM meta WHERE key = 'last_inbound_ingest_at'").get() as any;
+  // Uses idx_messages_ts; measured at 0,2 ms against 151.987 rows.
+  const inb = db.prepare("SELECT MAX(timestamp) AS t FROM messages WHERE from_me = 0").get() as any;
+  const lastInboundAt = inb?.t ? Number(inb.t) : null; // MAX() de conjunto vazio é NULL
+
   return {
     connected,
     initialSyncDone: done?.value === "1",
     messageCount: m.n,
     chatCount: c.n,
     lastConnectedAt: last?.value ? Number(last.value) : null,
+    lastInboundAt,
+    lastInboundIngestAt: ingest?.value ? Number(ingest.value) : null,
+    inbound: assessInbound({
+      now: Math.floor(Date.now() / 1000),
+      lastInboundMsgTs: lastInboundAt,
+      // The MCP process has no live tracker; it still gets the silence verdict.
+      health: health ?? {
+        decryptedLastHour: 0,
+        undecryptableLastHour: 0,
+        disconnectsLastHour: 0,
+        bufferingSinceMs: null,
+      },
+    }),
   };
 }

@@ -1,3 +1,4 @@
+import type { InboundHealth } from "../shared/health.js";
 import type { DB } from "../shared/migrations.js";
 import type { ControlResponse } from "../shared/types.js";
 import { getSyncStatus } from "../mcp/queries.js";
@@ -14,6 +15,8 @@ export interface ControlDeps {
   drafts: DraftStore;
   sender: Sender;
   connected: () => boolean;
+  /** Live counters from the daemon. status runs in-process, so these need no disk. */
+  health?: () => InboundHealth;
 }
 
 const fail = (error: string): ControlResponse => ({ ok: false, error });
@@ -45,7 +48,7 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
   try {
     switch (c.cmd) {
       case "status":
-        return done(getSyncStatus(deps.db, deps.connected()));
+        return done(getSyncStatus(deps.db, deps.connected(), deps.health?.()));
 
       case "draft": {
         if (typeof c.jid !== "string" || typeof c.text !== "string" || c.text.trim() === "") {

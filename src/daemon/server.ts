@@ -1,6 +1,44 @@
-import { createServer, type Server } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { handleCommand, type ControlDeps } from "./control.js";
+
+/** How long to wait for an existing socket to prove it still has an owner. */
+const PROBE_TIMEOUT_MS = 1_000;
+
+/**
+ * A socket file left over from a crash has to go, but a LIVE one means another
+ * daemon already owns this auth directory, and unlinking it is exactly how two
+ * daemons came to share one Signal ratchet on 25/08: the second login evicted the
+ * first (13 `connectionReplaced` disconnects), both kept writing to the same
+ * ~/.whatsapp-mcp/auth, and every peer's session desynced.
+ *
+ * Connecting is the only honest liveness test — a unix socket file outlives the
+ * process that made it, so its existence proves nothing on its own.
+ */
+export async function claimSocketFile(socketFile: string): Promise<void> {
+  if (!existsSync(socketFile)) return;
+
+  const ownerAlive = await new Promise<boolean>((resolve) => {
+    const probe = connect(socketFile);
+    const settle = (v: boolean): void => {
+      probe.destroy();
+      resolve(v);
+    };
+    probe.once("connect", () => settle(true));
+    probe.once("error", () => settle(false)); // ECONNREFUSED = nobody listening
+    setTimeout(() => settle(false), PROBE_TIMEOUT_MS).unref();
+  });
+
+  if (ownerAlive) {
+    throw new Error(
+      `outro daemon já está escutando em ${socketFile}. Dois daemons no mesmo ` +
+        `~/.whatsapp-mcp/auth corrompem as sessões Signal e derrubam o recebimento. ` +
+        `Pare o outro primeiro: launchctl bootout gui/$(id -u)/com.samuelcabral.whatsapp-daemon`,
+    );
+  }
+
+  unlinkSync(socketFile);
+}
 
 /**
  * One JSON object per line, in and out. A unix socket with 0600 means the OS
@@ -10,7 +48,7 @@ export async function startControlServer(opts: {
   socketFile: string;
   deps: ControlDeps;
 }): Promise<{ close(): Promise<void> }> {
-  if (existsSync(opts.socketFile)) unlinkSync(opts.socketFile); // stale socket from a crash
+  await claimSocketFile(opts.socketFile);
 
   const server: Server = createServer((sock) => {
     let buffer = "";
