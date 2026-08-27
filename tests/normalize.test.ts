@@ -90,3 +90,60 @@ describe("isUserJid", () => {
     expect(isUserJid("12345@bot")).toBe(false);
   });
 });
+
+describe("envelopes que escondem o conteúdo", () => {
+  const row = (message: unknown) =>
+    toMessageRow({
+      key: { remoteJid: "5511@s.whatsapp.net", fromMe: false, id: "W1" },
+      messageTimestamp: 1787845000,
+      message,
+    });
+
+  it("lê mensagem temporária (ephemeralMessage)", () => {
+    const r = row({ ephemeralMessage: { message: { conversation: "some em 24h" } } });
+    expect(r?.type).toBe("text");
+    expect(r?.text).toBe("some em 24h");
+  });
+
+  it("lê view once", () => {
+    const r = row({ viewOnceMessageV2: { message: { imageMessage: { caption: "olha isso" } } } });
+    expect(r?.type).toBe("image");
+    expect(r?.text).toBe("olha isso");
+  });
+
+  it("lê documento com legenda", () => {
+    const r = row({ documentWithCaptionMessage: { message: { documentMessage: { fileName: "contrato.pdf" } } } });
+    expect(r?.type).toBe("document");
+    expect(r?.text).toBe("contrato.pdf");
+  });
+
+  it("desembrulha envelope aninhado", () => {
+    const r = row({ ephemeralMessage: { message: { viewOnceMessageV2: { message: { conversation: "duplo" } } } } });
+    expect(r?.text).toBe("duplo");
+  });
+
+  it("envelope vazio continua sendo 'other', sem estourar", () => {
+    const r = row({ ephemeralMessage: {} });
+    expect(r?.type).toBe("other");
+  });
+});
+
+describe("timestamp inválido não derruba o lote", () => {
+  it("descarta a mensagem em vez de gravar NaN", () => {
+    const r = toMessageRow({
+      key: { remoteJid: "5511@s.whatsapp.net", fromMe: false, id: "NAN1" },
+      messageTimestamp: "lixo",
+      message: { conversation: "oi" },
+    });
+    expect(r).toBeNull();
+  });
+
+  it("aceita timestamp como string numérica", () => {
+    const r = toMessageRow({
+      key: { remoteJid: "5511@s.whatsapp.net", fromMe: false, id: "STR1" },
+      messageTimestamp: "1787845000",
+      message: { conversation: "oi" },
+    });
+    expect(r?.timestamp).toBe(1787845000);
+  });
+});

@@ -1,14 +1,46 @@
 import { normalizeJid, isGroupJid } from "./jid.js";
 import type { MessageRow, MessageType } from "./types.js";
 
-/** Baileys returns timestamps as number, Long, or numeric string depending on the path. */
+/**
+ * Baileys returns timestamps as number, Long, or numeric string depending on the
+ * path. Every branch is funnelled through the same finiteness check because
+ * `timestamp` is NOT NULL: a NaN binds as NULL, and since ingestMessages runs
+ * inside db.transaction, one malformed message would roll back the whole batch.
+ */
 function toEpochSeconds(value: unknown): number | null {
-  if (typeof value === "number") return value;
-  if (typeof value === "string" && value !== "") return Number(value);
-  if (value && typeof value === "object" && "low" in (value as any)) {
-    return Number((value as any).low);
+  const n =
+    typeof value === "number" ? value
+    : typeof value === "string" && value !== "" ? Number(value)
+    : value && typeof value === "object" && "low" in (value as any) ? Number((value as any).low)
+    : null;
+  return n !== null && Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Disappearing messages, view-once and captioned documents do not replace the
+ * content — they wrap it one level down. Reading only the outer envelope threw the
+ * real message away and filed it as type "other" with no text.
+ */
+const WRAPPERS = [
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+  "documentWithCaptionMessage",
+  "editedMessage",
+  "protocolMessage",
+] as const;
+
+function unwrap(message: Record<string, any>): Record<string, any> {
+  let current = message;
+  // Bounded because these can legitimately nest (an edited view-once, say), and an
+  // unbounded loop over attacker-shaped input is not worth the elegance.
+  for (let depth = 0; depth < 5; depth++) {
+    const key = WRAPPERS.find((k) => current?.[k]?.message);
+    if (!key) break;
+    current = current[key].message;
   }
-  return null;
+  return current;
 }
 
 const MEDIA: Array<[string, MessageType]> = [
@@ -25,7 +57,8 @@ const MEDIA: Array<[string, MessageType]> = [
  * Media binaries are deliberately not downloaded: type + caption is enough for
  * summarizing, searching and triage, and it keeps the store small.
  */
-function classify(message: Record<string, any>): { type: MessageType; text: string | null; quotedId: string | null } {
+function classify(outer: Record<string, any>): { type: MessageType; text: string | null; quotedId: string | null } {
+  const message = unwrap(outer);
   if (typeof message.conversation === "string") {
     return { type: "text", text: message.conversation, quotedId: null };
   }
