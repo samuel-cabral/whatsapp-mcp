@@ -17,12 +17,31 @@ const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
  */
 function syncNote(db: DB): string {
   const status = getSyncStatus(db, true);
-  return status.initialSyncDone
-    ? ""
-    : `\n\n⚠️ O histórico ainda está sincronizando (${status.messageCount} mensagens até agora). Resultados podem estar incompletos.`;
+
+  // The blackout of 25/08 lasted 47 hours partly because nothing volunteered the
+  // bad news: the only way to hear it was to call whatsapp_status and ask. Every
+  // read now carries it, because "nothing found" and "we stopped receiving" look
+  // identical from the outside and lead to opposite conclusions.
+  // Order matters: mid initial sync there is no inbound history yet, so a silence
+  // verdict there is a false alarm, not news.
+  if (!status.initialSyncDone) {
+    return `\n\n⚠️ O histórico ainda está sincronizando (${status.messageCount} mensagens até agora). Resultados podem estar incompletos.`;
+  }
+  if (status.inbound.verdict === "quebrado") {
+    return `\n\n🚨 O recebimento está quebrado: ${status.inbound.reason} O que está abaixo pode estar desatualizado.`;
+  }
+  if (status.inbound.verdict === "suspeito") {
+    return `\n\n⚠️ ${status.inbound.reason} Pode haver mensagem faltando.`;
+  }
+  return "";
 }
 
-const when = (ts: number) => new Date(ts * 1000).toISOString().replace("T", " ").slice(0, 16);
+// Local time, not UTC: whoever reads this is sitting in the same timezone as the
+// phone that sent the messages, and toISOString() silently shifted every
+// conversation by the machine's offset. sv-SE is the locale whose short format is
+// already "YYYY-MM-DD HH:MM:SS".
+const when = (ts: number) =>
+  new Date(ts * 1000).toLocaleString("sv-SE", { hour12: false }).slice(0, 16);
 
 export function registerReadTools(server: McpServer, ctx: ToolContext): void {
   server.tool(
@@ -100,8 +119,14 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       const res = await ctx.client.send({ cmd: "status" });
       if (!res.ok) return text(`Não deu para falar com o daemon: ${res.error}`);
       const s = res.result as any;
+      // Receiving comes first on purpose: "conectado: sim" was the top line for the
+      // 47 hours this daemon received nothing, and it read like an all-clear.
+      const marca = { ok: "sim", suspeito: "TALVEZ", quebrado: "NÃO" }[
+        s.inbound?.verdict as "ok" | "suspeito" | "quebrado"
+      ] ?? "?";
       return text(
-        `conectado: ${s.connected ? "sim" : "não"}\n` +
+        `recebendo: ${marca} — ${s.inbound?.reason ?? "sem informação"}\n` +
+          `conectado: ${s.connected ? "sim" : "não"}\n` +
           `sync inicial: ${s.initialSyncDone ? "completo" : "em andamento"}\n` +
           `mensagens: ${s.messageCount}\nconversas: ${s.chatCount}`,
       );

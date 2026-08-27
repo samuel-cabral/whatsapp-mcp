@@ -71,3 +71,88 @@ describe("tools de leitura", () => {
     expect(textOf(res)).toMatch(/nenhuma mensagem/i);
   });
 });
+
+describe("fuso horário", () => {
+  // 2026-08-25 11:40:16 em Fortaleza (UTC-3) é 14:40:16 em UTC. Mostrar o horário
+  // em UTC faz toda conversa aparecer 3h no futuro para quem lê.
+  const TS = 1787668816;
+  const tzAround = async (tz: string, fn: () => Promise<string>) => {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+      return await fn();
+    } finally {
+      // Assigning undefined back would store the literal string "undefined", and
+      // Node then silently falls back to UTC for every later test in this worker.
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
+  };
+
+  it("read_messages mostra o horário local, não UTC", async () => {
+    ingestMessages(db, [
+      { key: { remoteJid: IGOR, fromMe: false, id: "TZ1" }, messageTimestamp: TS, message: { conversation: "que horas sao" } },
+    ]);
+    const client = await connectClient(db);
+    const out = await tzAround("America/Fortaleza", async () =>
+      textOf(await client.callTool({ name: "read_messages", arguments: { jid: IGOR } })),
+    );
+    expect(out).toContain("2026-08-25 11:40");
+    expect(out).not.toContain("2026-08-25 14:40");
+  });
+
+  it("acompanha o fuso da máquina", async () => {
+    ingestMessages(db, [
+      { key: { remoteJid: IGOR, fromMe: false, id: "TZ2" }, messageTimestamp: TS, message: { conversation: "que horas sao" } },
+    ]);
+    const client = await connectClient(db);
+    const out = await tzAround("UTC", async () =>
+      textOf(await client.callTool({ name: "read_messages", arguments: { jid: IGOR } })),
+    );
+    expect(out).toContain("2026-08-25 14:40");
+  });
+});
+
+describe("aviso de recebimento quebrado nas leituras", () => {
+  // O apagão durou 47h em parte porque nada se oferecia para contar: só quem
+  // chamasse whatsapp_status ficava sabendo. "Nada encontrado" e "paramos de
+  // receber" são indistinguíveis de fora e levam a conclusões opostas.
+  const semRecebidas = (db: DB) => {
+    db.prepare("DELETE FROM messages WHERE from_me = 0").run();
+    db.prepare("INSERT INTO meta (key,value) VALUES ('initial_sync_done','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
+  };
+
+  it("read_messages avisa quando o recebimento está quebrado", async () => {
+    ingestMessages(db, [
+      { key: { remoteJid: IGOR, fromMe: false, id: "OLD" }, messageTimestamp: 1787674849, message: { conversation: "antiga" } },
+    ]);
+    db.prepare("INSERT INTO meta (key,value) VALUES ('initial_sync_done','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
+    const client = await connectClient(db);
+    const out = textOf(await client.callTool({ name: "read_messages", arguments: { jid: IGOR } }));
+    expect(out).toMatch(/recebimento está quebrado/);
+  });
+
+  it("não avisa nada quando o recebimento está em dia", async () => {
+    ingestMessages(db, [
+      {
+        key: { remoteJid: IGOR, fromMe: false, id: "NOVA" },
+        messageTimestamp: Math.floor(Date.now() / 1000) - 60,
+        message: { conversation: "agorinha" },
+      },
+    ]);
+    db.prepare("INSERT INTO meta (key,value) VALUES ('initial_sync_done','1') ON CONFLICT(key) DO UPDATE SET value='1'").run();
+    const client = await connectClient(db);
+    const out = textOf(await client.callTool({ name: "read_messages", arguments: { jid: IGOR } }));
+    expect(out).not.toMatch(/quebrado|Pode haver mensagem faltando/);
+  });
+
+  it("o aviso também aparece quando a busca não acha nada", async () => {
+    semRecebidas(db);
+    ingestMessages(db, [
+      { key: { remoteJid: IGOR, fromMe: false, id: "OLD2" }, messageTimestamp: 1787674849, message: { conversation: "antiga" } },
+    ]);
+    const client = await connectClient(db);
+    const out = textOf(await client.callTool({ name: "search_messages", arguments: { query: "inexistente" } }));
+    expect(out).toMatch(/recebimento está quebrado/);
+  });
+});
