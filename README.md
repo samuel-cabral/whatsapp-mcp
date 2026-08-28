@@ -21,8 +21,10 @@ Two processes, split by who writes:
   auto-reply, human-paced backfill, human-confirmed sends) but cannot eliminate
   that risk. Consider a secondary number if yours is critical.
 - **Your entire WhatsApp ends up in plain text** in `~/.whatsapp-mcp/store.db`.
-  The daemon creates the directory with mode `700` and files with `600` — keep it
-  that way. Anyone with access to that file has your message history.
+  `~/.whatsapp-mcp` is created `700` and that directory bit is what actually keeps
+  other users out; inside it only `store.db` and the control socket are `600`, the
+  Baileys credential files are not. Keep the directory `700`. Anyone who gets past
+  it has your entire message history and your session credentials.
 
 ## Setup
 
@@ -72,7 +74,7 @@ launchctl load ~/Library/LaunchAgents/com.samuelcabral.whatsapp-daemon.plist
 | `read_messages` | read | messages of one chat, by time window or limit |
 | `search_messages` | read | full-text search, accent-insensitive |
 | `get_contact` | read | resolve a name or number to a jid |
-| `whatsapp_status` | read | connection + sync progress |
+| `whatsapp_status` | read | whether messages are still arriving, plus connection and sync |
 | `backfill_chat` | write | pull older history, 50 messages a page |
 | `draft_message` | write | prepare a message — **does not send** |
 | `confirm_send` | write | send a prepared draft — takes only a `draftId` |
@@ -84,9 +86,13 @@ There is no tool that sends a message directly, and that is the point.
 `draft_message` stores the draft **inside the daemon** and returns the exact text
 plus a `draftId`. `confirm_send` accepts **only the id** — no text parameter
 exists — so the daemon sends what it stored, never what the caller says at
-confirmation time. A prompt injection hidden in a message you receive can, at
-worst, produce a weird draft that you read before approving. Drafts expire after
-10 minutes and die with the daemon: it fails closed.
+confirmation time. That is the guarantee, and it is narrower than "nothing can be
+sent without you": the approval step itself lives in your MCP client's UI, not in
+this repo, so a client that auto-approves tool calls will chain `draft_message`
+into `confirm_send` with no human in between. What this repo guarantees is that
+the text sent is the text it stored, and that a prompt injection cannot smuggle a
+different recipient or body into the confirmation. Drafts expire after 10 minutes
+and die with the daemon: it fails closed.
 
 ## Development
 

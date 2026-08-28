@@ -80,7 +80,7 @@ describe("toMessageRow", () => {
 describe("isUserJid", () => {
   it("aceita pessoa em @s.whatsapp.net e em @lid", () => {
     expect(isUserJid("5511999999999@s.whatsapp.net")).toBe(true);
-    expect(isUserJid("42700665520139@lid")).toBe(true);
+    expect(isUserJid("100000000000000@lid")).toBe(true);
   });
 
   it("recusa grupo e os pseudo-jids que carregam pushName mas não são gente", () => {

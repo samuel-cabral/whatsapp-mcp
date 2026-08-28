@@ -67,11 +67,14 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
 
       case "confirm": {
         if (typeof c.draftId !== "string") return fail("confirm exige draftId");
+        // Check the connection BEFORE consuming the draft. take() is destructive, so
+        // failing after it would burn the draft and make the retry answer "already
+        // sent" — the one answer you must not give about a message to a real person.
+        if (!deps.connected()) return fail("WhatsApp desconectado — nada foi enviado.");
         const draft = deps.drafts.take(c.draftId);
         if (!draft) {
           return fail("rascunho inexistente, já enviado ou vencido (10 min). Redija de novo com draft_message.");
         }
-        if (!deps.connected()) return fail("WhatsApp desconectado — nada foi enviado.");
         const msgId = await deps.sender.sendText(draft.jid, draft.text);
         return done({ sent: true, msgId, jid: draft.jid });
       }

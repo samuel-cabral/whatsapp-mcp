@@ -8,16 +8,16 @@
        If you upgrade node, update this line. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/samuel/.local/share/fnm/node-versions/v22.12.0/installation/bin/node</string>
-    <string>/Users/samuel/Documents/6-work/projetos/whatsapp-mcp/build/daemon/index.js</string>
+    <string>/ABSOLUTE/PATH/TO/node</string>
+    <string>/ABSOLUTE/PATH/TO/whatsapp-mcp/build/daemon/index.js</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/Users/samuel/.whatsapp-mcp/daemon.log</string>
+  <string>/ABSOLUTE/PATH/TO/HOME/.whatsapp-mcp/daemon.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/samuel/.whatsapp-mcp/daemon.log</string>
+  <string>/ABSOLUTE/PATH/TO/HOME/.whatsapp-mcp/daemon.log</string>
 </dict>
 </plist>

@@ -124,3 +124,23 @@ describe("handleCommand — a trava de envio", () => {
     expect(fetchOlder).toHaveBeenCalledWith(IGOR, 2);
   });
 });
+
+describe("confirm com WhatsApp desconectado", () => {
+  it("não queima o rascunho: reconectou, o mesmo id ainda envia", async () => {
+    let online = true;
+    const d = await handleCommand({ cmd: "draft", jid: IGOR, text: "oi" }, deps);
+    const draftId = (d.result as any).draftId;
+
+    const offline = { ...deps, connected: () => online };
+    online = false;
+    const nao = await handleCommand({ cmd: "confirm", draftId }, offline);
+    expect(nao.ok).toBe(false);
+    expect(nao.error).toMatch(/desconectado/);
+    expect(sendText).not.toHaveBeenCalled();
+
+    online = true;
+    const sim = await handleCommand({ cmd: "confirm", draftId }, offline);
+    expect(sim.ok).toBe(true);
+    expect(sendText).toHaveBeenCalledOnce();
+  });
+});

@@ -107,13 +107,13 @@ describe("pushName vindo das mensagens", () => {
   it("aprende de jid @lid, que é como o WhatsApp endereça hoje", () => {
     ingestMessages(db, [
       {
-        key: { remoteJid: "42700665520139@lid", fromMe: false, id: "L1" },
+        key: { remoteJid: "100000000000000@lid", fromMe: false, id: "L1" },
         messageTimestamp: 1754000000,
         message: { conversation: "oi" },
         pushName: "Glaucia",
       },
     ]);
-    const c = db.prepare("SELECT push_name FROM contacts WHERE jid = ?").get("42700665520139@lid") as any;
+    const c = db.prepare("SELECT push_name FROM contacts WHERE jid = ?").get("100000000000000@lid") as any;
     expect(c.push_name).toBe("Glaucia");
   });
 

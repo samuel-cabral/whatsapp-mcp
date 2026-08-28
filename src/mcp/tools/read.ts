@@ -113,7 +113,7 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "whatsapp_status",
-    "Estado da conexão e do sync de histórico.",
+    "Se ainda está chegando mensagem, mais estado da conexão e do sync. Consulte antes de concluir que uma conversa está sem novidade.",
     {},
     async () => {
       const res = await ctx.client.send({ cmd: "status" });
