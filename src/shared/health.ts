@@ -30,10 +30,15 @@ export interface InboundAssessment {
 }
 
 /**
- * Daytime only. Measured over 64.754 messages across 79 days, the worst real
- * daytime gap in this account was 113 minutes and the p99.99 was 94; by wall clock
- * the worst gap is 7.4 hours and the fifteen largest are all overnight. A wall
- * clock threshold loose enough to survive a night is too loose to catch a workday.
+ * Daytime only. Recalibrated over 100.956 received messages across 180 days: the
+ * worst real daytime gap in this account was 170 minutes, so the 180-minute suspect
+ * threshold would have fired zero false alarms over that period. By wall clock the
+ * worst gap is hours and the largest are all overnight, which is the whole point —
+ * a threshold loose enough to survive a night is too loose to catch a workday.
+ *
+ * The earlier calibration in this comment used a 79-day window and reported 113
+ * minutes. Both were correct for their window; the longer one is the honest bound
+ * and is what the numbers quoted publicly refer to.
  */
 export const DAY_START_HOUR = 7;
 export const DAY_END_HOUR = 23;
