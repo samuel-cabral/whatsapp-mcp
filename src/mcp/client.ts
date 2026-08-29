@@ -36,7 +36,7 @@ export class ControlClient {
       sock.on("error", () =>
         done({
           ok: false,
-          error: "daemon fora do ar. Suba com: npx whatsapp-daemon (ou carregue o serviço do launchd).",
+          error: "daemon fora do ar. Suba com: node build/daemon/index.js (ou carregue o serviço do launchd).",
         }));
     });
   }

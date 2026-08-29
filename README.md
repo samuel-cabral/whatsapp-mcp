@@ -1,5 +1,7 @@
 # whatsapp-mcp
 
+[![CI](https://github.com/samuel-cabral/whatsapp-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/samuel-cabral/whatsapp-mcp/actions/workflows/ci.yml)
+
 MCP server for your **personal WhatsApp**: Claude reads your history, searches it,
 triages unread chats — and sends messages only through an explicit two-step
 confirmation.
@@ -12,6 +14,10 @@ Two processes, split by who writes:
   and to WhatsApp. It also owns message drafts.
 - **`whatsapp-mcp`** — the MCP server Claude talks to. Opens the same database
   **read-only** and asks the daemon over a unix socket when it needs to send.
+
+> **Runtime output is in Brazilian Portuguese.** Log lines, error messages, MCP
+> tool descriptions and the `whatsapp_status` output are all pt-BR. Only this
+> README is in English.
 
 ## ⚠️ Read this before using
 
@@ -26,45 +32,108 @@ Two processes, split by who writes:
   Baileys credential files are not. Keep the directory `700`. Anyone who gets past
   it has your entire message history and your session credentials.
 
+## Requirements
+
+- **Node 22 or newer.** Older versions fail during build without a useful message.
+- **A build toolchain**, if npm has no prebuilt binary for your platform:
+  `better-sqlite3` falls back to compiling, which needs python3 and a C++ compiler.
+- **`nc` with `-U`** (unix socket support) for the status check below. On Fedora and
+  RHEL install `nmap-ncat`; you can skip it and use the `whatsapp_status` tool instead.
+- **macOS or Linux.** Developed on macOS; the launchd section is macOS only.
+- **Your phone**, to scan the pairing QR code.
+
 ## Setup
 
 ```bash
 npm install
 npm run build
 
-# 1. Start the daemon; a QR code appears on first run — scan it with
-#    WhatsApp on your phone (Settings → Linked devices).
+# 1. Start the daemon. On first run a QR code is printed — scan it with
+#    WhatsApp on your phone (Settings → Linked devices → Link a device).
+#    If the QR expires, a new one is printed automatically.
 node build/daemon/index.js
 
-# 2. Wait for the initial history sync (watch the "history: +N" log lines;
-#    they carry a percentage, and "(sync inicial completo)" marks the end).
+# 2. Wait for the initial history sync. Watch the "history: +N mensagens NN%"
+#    lines; "(sync inicial completo)" marks the end. Expect tens of minutes to a
+#    few hours depending on how much history your account has.
 
 # 3. Check it from another terminal:
 printf '{"cmd":"status"}\n' | nc -U ~/.whatsapp-mcp/control.sock
 ```
 
-### Register with Claude Code
+Leave the daemon running. Stop it with Ctrl+C; nothing is lost, it resumes on the
+next start.
+
+### Register with your MCP client
+
+**Use an absolute path to `node`.** MCP clients start with a minimal `PATH`, so a
+bare `"node"` fails for anyone using nvm, fnm or asdf. Find yours with `which node`.
+
+**Claude Code** — one command, no file to edit:
+
+```bash
+claude mcp add whatsapp -- /ABSOLUTE/PATH/TO/node /ABSOLUTE/PATH/TO/whatsapp-mcp/build/mcp/index.js
+```
+
+**Claude Desktop** — edit
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or
+`%APPDATA%\Claude\claude_desktop_config.json` (Windows), then restart the app:
 
 ```json
 {
   "mcpServers": {
     "whatsapp": {
-      "command": "node",
+      "command": "/ABSOLUTE/PATH/TO/node",
       "args": ["/ABSOLUTE/PATH/TO/whatsapp-mcp/build/mcp/index.js"]
     }
   }
 }
 ```
 
+The MCP server needs the daemon to be running. It reads the database directly and
+talks to the daemon only to send.
+
 ### Run the daemon at login (macOS)
 
-Edit `launchd/com.samuelcabral.whatsapp-daemon.plist` (node path — check
-`which node` — and project path), then:
+**Stop the daemon you started by hand first.** The plist sets `KeepAlive`, and the
+daemon refuses to start when another one already owns the socket — so leaving both
+around gives you a process that crashes and relaunches every ten seconds, forever.
+
+Edit `launchd/com.samuelcabral.whatsapp-daemon.plist` and replace every
+`/ABSOLUTE/PATH/TO/...` (node path from `which node`, project path, and your home
+directory for the log). Then:
 
 ```bash
 cp launchd/com.samuelcabral.whatsapp-daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.samuelcabral.whatsapp-daemon.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.samuelcabral.whatsapp-daemon.plist
 ```
+
+To stop it, and to watch it:
+
+```bash
+launchctl bootout gui/$(id -u)/com.samuelcabral.whatsapp-daemon
+tail -f ~/.whatsapp-mcp/daemon.log
+```
+
+**Under launchd the QR code goes to the log file, not to your terminal.** If you
+ever need to pair again, `tail -f` the log to see it. Nothing rotates that log, so
+prune it yourself if it grows.
+
+## Using it
+
+Once the daemon is synced and the MCP server is registered, you talk to your own
+history in plain language:
+
+- *"o que rolou no grupo do trabalho hoje?"*
+- *"o que eu ainda não respondi?"* — triage over unread chats
+- *"acha a mensagem em que a Ana mandou o link do apartamento"*
+- *"resume a conversa com o Pedro dessa semana"*
+- *"manda pra Ana: chego 19h"* — this comes back as a **draft**, not a sent message.
+  You read the exact text, then approve it in a second turn.
+
+Read results carry a banner when the store cannot be trusted: still syncing, or no
+longer receiving. It is deliberate — "nothing found" and "we stopped receiving" look
+identical from the outside and lead to opposite conclusions.
 
 ## Tools
 
@@ -94,6 +163,36 @@ the text sent is the text it stored, and that a prompt injection cannot smuggle 
 different recipient or body into the confirmation. Drafts expire after 10 minutes
 and die with the daemon: it fails closed.
 
+## Knowing when it stopped receiving
+
+This daemon once went 47 hours without receiving a single message while its status
+still answered "connected: yes". Monitoring the connection is not monitoring the
+service, so it now measures the thing that actually matters.
+
+`whatsapp_status` leads with `recebendo:` (receiving), and calls it broken when:
+
+- **6 hours of daytime silence** (07:00–23:00 local; a threshold loose enough to
+  survive a night is too loose to catch a workday). 3 hours marks it suspicious.
+- **20 undecryptable messages in an hour with zero decrypted** — traffic arriving
+  and nothing readable is a break, not a quiet afternoon, and this catches it in
+  about forty minutes instead of six hours.
+- **the event buffer stuck for more than a minute**, which is the exact shape of
+  the outage above.
+
+It also tries to heal itself: it drains a stuck event buffer, renegotiates broken
+Signal sessions in small batches, and tops up pre-keys when the server pool runs
+low. Those are in `src/daemon/socket.ts`, each with the measurement that motivated it.
+
+## When something breaks
+
+| symptom | what to do |
+|---|---|
+| `outro daemon já está escutando...` | Another daemon owns the socket. Stop it: `launchctl bootout gui/$(id -u)/com.samuelcabral.whatsapp-daemon`, or kill the one you started by hand. |
+| `recebendo: NÃO` in the status | The daemon retries on its own. If it persists, restart the daemon and watch the log. If messages still do not arrive, the Signal session is broken: delete `~/.whatsapp-mcp/auth` and pair again. |
+| `sessão encerrada no celular` | You unlinked the device from your phone. Delete `~/.whatsapp-mcp/auth` and pair again. |
+| MCP client says the daemon is down | Start it, and check you used an absolute path to `node` when registering. |
+| Want to start over | Delete `~/.whatsapp-mcp/auth` to re-pair — that is safe. **Deleting `store.db` is not reversible:** full history arrives once, at first sync, and `backfill_chat` only pages back 50 messages at a time. |
+
 ## Development
 
 ```bash
@@ -101,9 +200,10 @@ npm test          # vitest, everything runs against in-memory SQLite
 npm run typecheck
 ```
 
-No test touches real WhatsApp. The Baileys surface is confined to
-`src/daemon/socket.ts` behind a narrow `Sender` interface, which is also what
-would make a future migration to the official Cloud API a one-file change.
+No test touches real WhatsApp. Baileys is imported in exactly one file,
+`src/daemon/socket.ts`, behind a narrow `Sender` interface.
+
+The design document is in [`docs/design.md`](docs/design.md) (pt-BR).
 
 ## License
 

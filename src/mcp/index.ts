@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   } catch {
     console.error(
       `[${SERVER_NAME}] banco não encontrado em ${paths.dbFile}.\n` +
-        "Suba o daemon primeiro: npx whatsapp-daemon",
+        "Suba o daemon primeiro: node build/daemon/index.js (ou carregue o serviço do launchd).",
     );
     process.exit(1);
   }
