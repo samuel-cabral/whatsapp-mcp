@@ -4,8 +4,10 @@
 <dict>
   <key>Label</key>
   <string>com.samuelcabral.whatsapp-daemon</string>
-  <!-- fnm's stable install path; the multishell symlink changes per session.
-       If you upgrade node, update this line. -->
+  <!-- Must be a STABLE absolute path to node. Do not paste `which node`: under fnm
+       and nvm that is a per-shell path that stops existing when the shell does, and
+       KeepAlive would then relaunch this forever against a missing binary.
+       Get the right one with: node -e 'console.log(process.execPath)' -->
   <key>ProgramArguments</key>
   <array>
     <string>/ABSOLUTE/PATH/TO/node</string>

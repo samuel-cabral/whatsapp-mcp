@@ -34,11 +34,14 @@ Two processes, split by who writes:
 
 ## Requirements
 
-- **Node 22 or newer.** Older versions fail during build without a useful message.
+- **Node 22.** That is what `engines` declares and what CI runs; older versions are
+  untested. (npm only warns about `engines`, so a wrong version fails later, not at install.)
 - **A build toolchain**, if npm has no prebuilt binary for your platform:
   `better-sqlite3` falls back to compiling, which needs python3 and a C++ compiler.
-- **`nc` with `-U`** (unix socket support) for the status check below. On Fedora and
-  RHEL install `nmap-ncat`; you can skip it and use the `whatsapp_status` tool instead.
+- **`nc` with `-U`** (unix socket support), for the status check in step 3. Debian and
+  Ubuntu need `netcat-openbsd`, Fedora and RHEL need `nmap-ncat`. If you would rather not
+  install it, skip step 3 — once the MCP client is registered, the `whatsapp_status` tool
+  answers the same question.
 - **macOS or Linux.** Developed on macOS; the launchd section is macOS only.
 - **Your phone**, to scan the pairing QR code.
 
@@ -66,8 +69,19 @@ next start.
 
 ### Register with your MCP client
 
-**Use an absolute path to `node`.** MCP clients start with a minimal `PATH`, so a
-bare `"node"` fails for anyone using nvm, fnm or asdf. Find yours with `which node`.
+**Use an absolute path to `node`, and make sure it is a stable one.** MCP clients start
+with a minimal `PATH`, so a bare `"node"` fails for anyone using nvm, fnm or asdf. But
+`which node` is not the answer either: under fnm it returns a per-shell path like
+`~/.local/state/fnm_multishells/<pid>_<timestamp>/bin/node`, which stops existing when
+that shell does. Get the real one with:
+
+```bash
+node -e 'console.log(process.execPath)'
+```
+
+That prints the version's install directory (for fnm,
+`~/.local/share/fnm/node-versions/vNN/installation/bin/node`). Update it when you upgrade
+Node.
 
 **Claude Code** — one command, no file to edit:
 
@@ -76,8 +90,7 @@ claude mcp add whatsapp -- /ABSOLUTE/PATH/TO/node /ABSOLUTE/PATH/TO/whatsapp-mcp
 ```
 
 **Claude Desktop** — edit
-`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or
-`%APPDATA%\Claude\claude_desktop_config.json` (Windows), then restart the app:
+`~/Library/Application Support/Claude/claude_desktop_config.json`, then restart the app:
 
 ```json
 {
@@ -90,8 +103,8 @@ claude mcp add whatsapp -- /ABSOLUTE/PATH/TO/node /ABSOLUTE/PATH/TO/whatsapp-mcp
 }
 ```
 
-The MCP server needs the daemon to be running. It reads the database directly and
-talks to the daemon only to send.
+The MCP server reads the database directly, so the read tools work even with the daemon
+stopped — they just stop seeing new messages. Sending needs the daemon up.
 
 ### Run the daemon at login (macOS)
 
