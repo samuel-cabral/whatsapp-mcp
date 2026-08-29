@@ -180,12 +180,14 @@ export async function createConnection(opts: {
    * (socket.js:547-556). A message that fails to decrypt gets a retry request but
    * no delivery receipt (messages-recv.js:651-670), so the server never closes the
    * offline batch and `ib,,offline` never comes. The buffer then swallows every
-   * inbound event until the process dies — including plaintext newsletters, which
-   * never touch Signal at all.
+   * inbound event until the process dies — including newsletter channels, which do
+   * not go through the same pairwise encryption path. Those going silent too is what
+   * ruled out "it is only a key problem".
    *
-   * That is how this store lost 47 hours: 104 connections, 104 "offline preview
-   * received", and zero "handled N offline messages". Draining on a timer costs
-   * nothing when the node does arrive, because by then there is nothing buffered.
+   * That is how this store lost 47 hours: over that window the log carries 101
+   * connections opened, 101 "offline preview received", and zero "handled N offline
+   * messages". Draining on a timer costs nothing when the node does arrive, because
+   * by then there is nothing buffered.
    */
   const startFlushWatchdog = (): void => {
     stopFlushWatchdog();
