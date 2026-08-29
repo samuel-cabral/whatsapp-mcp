@@ -34,7 +34,7 @@ Two processes, split by who writes:
 
 ## Requirements
 
-- **Node 22.** That is what `engines` declares and what CI runs; older versions are
+- **Node 22 or newer.** That is what `engines` declares and what CI runs; older versions are
   untested. (npm only warns about `engines`, so a wrong version fails later, not at install.)
 - **A build toolchain**, if npm has no prebuilt binary for your platform:
   `better-sqlite3` falls back to compiling, which needs python3 and a C++ compiler.
@@ -113,8 +113,10 @@ daemon refuses to start when another one already owns the socket — so leaving 
 around gives you a process that crashes and relaunches every ten seconds, forever.
 
 Edit `launchd/com.samuelcabral.whatsapp-daemon.plist` and replace every
-`/ABSOLUTE/PATH/TO/...` (node path from `which node`, project path, and your home
-directory for the log). Then:
+`/ABSOLUTE/PATH/TO/...` (node path from the `process.execPath` command above, project
+path, and your home directory for the log). Getting the node path wrong here is worse
+than in the MCP config: `KeepAlive` is on, so launchd will relaunch forever against a
+binary that no longer exists. Then:
 
 ```bash
 cp launchd/com.samuelcabral.whatsapp-daemon.plist ~/Library/LaunchAgents/
@@ -209,7 +211,7 @@ low. Those are in `src/daemon/socket.ts`, each with the measurement that motivat
 ## Development
 
 ```bash
-npm test          # vitest, everything runs against in-memory SQLite
+npm test          # vitest; every test database is in-memory, and none touch WhatsApp
 npm run typecheck
 ```
 
