@@ -1,5 +1,6 @@
 import makeWASocket, {
   DisconnectReason,
+  downloadContentFromMessage,
   getBinaryNodeChild,
   S_WHATSAPP_NET,
   useMultiFileAuthState,
@@ -24,8 +25,10 @@ import { makeTtlCache } from "../shared/ttl-cache.js";
 import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.js";
 import type { InboundHealth } from "../shared/health.js";
 import type { Sender } from "./control.js";
+import type { MediaFetcher } from "./audio-queue.js";
+import type { AudioRef } from "../shared/types.js";
 
-export interface WhatsAppConnection extends Sender {
+export interface WhatsAppConnection extends Sender, MediaFetcher {
   isConnected(): boolean;
   health(): InboundHealth;
   close(): Promise<void>;
@@ -71,6 +74,9 @@ export async function createConnection(opts: {
   authDir: string;
   db: DB;
   onQr?: (qr: string) => void;
+  /** Fired after an ingest queued voice notes, so the worker starts without waiting
+   *  for its own timer. */
+  onAudioEnqueued?: (count: number) => void;
 }): Promise<WhatsAppConnection> {
   const { db } = opts;
   const { state, saveCreds } = await useMultiFileAuthState(opts.authDir);
@@ -270,7 +276,11 @@ export async function createConnection(opts: {
 
     sock.ev.on("messages.upsert", ({ messages }) => {
       const batch = messages ?? [];
-      ingestMessages(db, batch);
+      const { enqueued } = ingestMessages(db, batch);
+      if (enqueued > 0) {
+        console.error(`[whatsapp-daemon] ${enqueued} áudio(s) enfileirado(s) para transcrição.`);
+        opts.onAudioEnqueued?.(enqueued);
+      }
 
       // Counting has to happen here, not in ingest: a message that failed to
       // decrypt never becomes a row, so the database can never tell us it arrived.
@@ -303,6 +313,38 @@ export async function createConnection(opts: {
       const sent = await sock.sendMessage(jid, { text });
       if (sent) ingestMessages(db, [sent]);
       return sent?.key?.id ?? "";
+    },
+
+    /**
+     * Downloads one voice note from its stored descriptor.
+     *
+     * downloadContentFromMessage, not downloadMediaMessage: the latter gates on
+     * `'url' in media` — key presence, not value — and JSON.stringify drops a key
+     * whose value is undefined, so a descriptor that round-tripped through media_ref
+     * would fail every single download with `"audioMessage" message is not a media
+     * message`, before touching the network. This one takes the descriptor directly
+     * and derives the URL from directPath.
+     *
+     * No reupload context is passed: Baileys awaits messages.media-update with no
+     * timeout there, and Promise.race does not cancel that wait, so a 404 would leak
+     * a listener per attempt. Expired media becomes an honest permanent failure.
+     *
+     * Note this never touches `sock` — it talks to mmg.whatsapp.net directly, so it
+     * keeps working while the socket is reconnecting.
+     */
+    async fetchAudio(ref: AudioRef): Promise<Buffer> {
+      // `url` is left off entirely rather than passed empty: downloadContentFromMessage
+      // only prefers a url when it starts with https://mmg.whatsapp.net/, and every
+      // WhatsApp url does — so storing one would beat the directPath every time and
+      // then expire. mediaKey is decoded here because the published type wants bytes,
+      // even though getMediaKeys would also take the base64 string.
+      const stream = await downloadContentFromMessage(
+        { mediaKey: Buffer.from(ref.mediaKey, "base64"), directPath: ref.directPath },
+        "audio",
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
     },
 
     async fetchOlder(jid: string, pages: number): Promise<number> {
