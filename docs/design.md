@@ -44,7 +44,7 @@ Dois processos, separados por **quem escreve**.
   │  (launchd, sempre)   │         │  (nasce e morre com     │
   │                      │         │   a sessão do Claude)   │
   │  · socket Baileys    │         │                         │
-  │  · ingest de eventos │         │  · 8 tools              │
+  │  · ingest de eventos │         │  · 9 tools              │
   │  · backfill          │         │  · zero estado próprio  │
   │  · dono dos drafts   │         │                         │
   └────┬────────────┬────┘         └───┬──────────────┬──────┘
@@ -109,17 +109,34 @@ ameaça para uso pessoal.
 |---|---|
 | `chats` | `jid` PK, nome, `is_group`, `last_message_at`, `unread_count`, `archived` |
 | `contacts` | `jid` PK, nome, `push_name` |
-| `messages` | `id` PK autoincrement, `UNIQUE (chat_jid, msg_id)`, `sender_jid`, `from_me`, `timestamp`, `type`, `text`, `quoted_id` |
-| `messages_fts` | FTS5 externo sobre `messages.text` |
+| `messages` | `id` PK autoincrement, `UNIQUE (chat_jid, msg_id)`, `sender_jid`, `from_me`, `timestamp`, `type`, `text`, `quoted_id`, mais `transcript`, `transcript_status`, `transcript_at`, `transcript_attempts`, `transcript_error` e `media_ref` |
+| `messages_fts` | FTS5 externo sobre `messages.text` **e** `messages.transcript` |
 | `sync_state` | por chat: `oldest_msg_id`, `oldest_ts`, `complete` |
 | `meta` | `schema_version`, `initial_sync_done`, `last_connected_at` |
 
 FTS5 com `tokenize = "unicode61 remove_diacritics 2"`. Sem isso, busca por "reuniao" não
 encontra "reunião" — o caso comum, não a exceção.
 
-Mídia fora do MVP: imagem, áudio e documento entram com `type`, legenda e nome do arquivo,
-sem baixar o binário. Resumo, busca e triagem funcionam sem isso. Download vira uma tool
-depois, se fizer falta.
+Mídia fora do MVP: imagem e documento entram com `type`, legenda e nome do arquivo, sem
+baixar o binário. Resumo, busca e triagem funcionam sem isso.
+
+**Áudio virou exceção.** Uma nota de voz não tem legenda nem nome de arquivo, então ela
+entrava como `text` NULL: invisível à busca e renderizada como o literal `(audio)`. Eram
+8.834 linhas mudas num store de 316 mil. A partir da v2 do schema, toda nota de voz nova é
+baixada, convertida e transcrita localmente pelo whisper.cpp dentro do daemon, e a
+transcrição vai para a coluna `transcript`, que o FTS indexa junto com `text`.
+
+A transcrição mora **fora** de `messages.text` de propósito: `ingest.ts` reescreve `text`
+a cada replay de história, e o proto de áudio não traz texto nenhum, então uma transcrição
+ali seria apagada a cada reconexão. E `getMessage` responde retry de peer com `text` — o
+palpite da máquina voltaria para quem gravou o áudio como se fosse coisa que digitamos.
+
+O binário do áudio continua não sendo guardado: ele é baixado para a memória, convertido
+num WAV temporário que morre num `finally`, e o que sobra no banco é a transcrição mais o
+descritor de download (`media_ref`), que é o que permite reprocessar.
+
+Histórico anterior à feature não é re-puxado: aquelas linhas não guardaram `mediaKey`, e o
+`directPath` delas nunca existiu no banco.
 
 ## Fluxo
 
@@ -162,8 +179,9 @@ Rascunho expira em 10 minutos e não sobrevive a reinício do daemon — falha f
 | `read_messages` | leitura | por chat, com intervalo de tempo ou limite |
 | `search_messages` | leitura | FTS, filtrável por chat e período |
 | `get_contact` | leitura | resolve nome ↔ jid |
-| `whatsapp_status` | leitura | conexão, progresso do sync, contagens |
+| `whatsapp_status` | leitura | conexão, progresso do sync, contagens, estado da transcrição |
 | `backfill_chat` | escrita | pede histórico mais antigo ao daemon |
+| `transcribe_audio` | escrita | transcreve um áudio específico, ou reprocessa com `force` |
 | `draft_message` | escrita | cria rascunho no daemon; **não envia** |
 | `confirm_send` | escrita | envia; aceita apenas `draft_id` |
 
@@ -215,8 +233,9 @@ sync demorado. Nenhum limite artificial no MVP; se doer, entra corte por data em
 
 ## Fora de escopo
 
-Mídia baixada, multi-conta, envio em massa, resposta automática, bridge inbound,
-criptografia em repouso, qualquer coisa multi-tenant.
+Mídia baixada e guardada (imagem, vídeo, documento), transcrição de qualquer mídia que não
+seja nota de voz, transcrição do histórico anterior à feature, multi-conta, envio em massa,
+resposta automática, bridge inbound, criptografia em repouso, qualquer coisa multi-tenant.
 
 Migração futura para a Cloud API oficial da Meta permanece possível porque a superfície de
 WhatsApp está inteira em `daemon/socket.ts` — as tools e o schema não sabem qual transporte

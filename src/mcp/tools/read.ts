@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { DB } from "../../shared/migrations.js";
 import { listChats, readMessages, searchMessages, getContact, getSyncStatus } from "../queries.js";
 import type { ControlClient } from "../client.js";
+import { renderBody, transcriptCaveat } from "../render.js";
 
 export interface ToolContext {
   db: DB;
@@ -74,9 +75,9 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       if (msgs.length === 0) return text(`Nenhuma mensagem em ${args.jid} nesse intervalo.` + syncNote(ctx.db));
       const lines = msgs.map(
         (m) =>
-          `[${when(m.at)}] ${m.fromMe ? "eu" : (m.senderName ?? m.sender ?? args.jid)}: ${m.text ?? `(${m.type})`}`,
+          `[${when(m.at)}] ${m.fromMe ? "eu" : (m.senderName ?? m.sender ?? args.jid)}: ${renderBody(m)}`,
       );
-      return text(lines.join("\n") + syncNote(ctx.db));
+      return text(lines.join("\n") + transcriptCaveat(lines) + syncNote(ctx.db));
     },
   );
 
@@ -94,9 +95,9 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       if (hits.length === 0) return text(`Nada encontrado para "${args.query}".` + syncNote(ctx.db));
       const lines = hits.map(
         (h) =>
-          `[${when(h.at)}] ${h.chatName ?? h.chatJid} — ${h.fromMe ? "eu" : (h.senderName ?? "eles")}: ${h.text ?? `(${h.type})`}`,
+          `[${when(h.at)}] ${h.chatName ?? h.chatJid} — ${h.fromMe ? "eu" : (h.senderName ?? "eles")}: ${renderBody(h)}`,
       );
-      return text(lines.join("\n") + syncNote(ctx.db));
+      return text(lines.join("\n") + transcriptCaveat(lines) + syncNote(ctx.db));
     },
   );
 
@@ -124,11 +125,22 @@ export function registerReadTools(server: McpServer, ctx: ToolContext): void {
       const marca = { ok: "sim", suspeito: "TALVEZ", quebrado: "NÃO" }[
         s.inbound?.verdict as "ok" | "suspeito" | "quebrado"
       ] ?? "?";
+      // Transcription goes last, and only when it has something to report. Never above
+      // `recebendo:` — a top line that read like an all-clear for 47 hours is why that
+      // ordering exists.
+      const t = s.transcription;
+      const nota =
+        !t ? ""
+        : !t.engineOk ? `\ntranscrição de áudio: PARADA — ${t.engineError || "motivo não registrado"}`
+        : t.pending > 0 || t.failed > 0 ? `\ntranscrição de áudio: ${t.pending} na fila, ${t.failed} falharam`
+        : "";
+
       return text(
         `recebendo: ${marca} — ${s.inbound?.reason ?? "sem informação"}\n` +
           `conectado: ${s.connected ? "sim" : "não"}\n` +
           `sync inicial: ${s.initialSyncDone ? "completo" : "em andamento"}\n` +
-          `mensagens: ${s.messageCount}\nconversas: ${s.chatCount}`,
+          `mensagens: ${s.messageCount}\nconversas: ${s.chatCount}` +
+          nota,
       );
     },
   );

@@ -47,4 +47,30 @@ export function registerWriteTools(server: McpServer, ctx: ToolContext): void {
       );
     },
   );
+
+  server.tool(
+    "transcribe_audio",
+    "Transcreve um áudio específico com o whisper local. Use quando a leitura mostrar " +
+      "(áudio, transcrevendo) parado ou (áudio, transcrição falhou). Só funciona para áudio recebido " +
+      "depois que a transcrição automática entrou: os antigos não têm mídia guardada. Já transcrito, " +
+      "devolve o texto guardado sem reprocessar, a menos que force.",
+    {
+      jid: z.string(),
+      // Both, always: the store's uniqueness is (chat_jid, msg_id), so a msgId on its
+      // own could name somebody else's message and hand back their words.
+      msgId: z.string(),
+      force: z.boolean().optional(),
+    },
+    async ({ jid, msgId, force }) => {
+      const res = await ctx.client.send({ cmd: "transcribe", jid, msgId, force: force === true });
+      if (!res.ok) return text(res.error);
+
+      const r = res.result as { state: string; text?: string; error?: string };
+      if (r.state === "done") {
+        return text(r.text ? `(áudio, transcrito) ${r.text}` : "(áudio, sem fala reconhecida)");
+      }
+      if (r.state === "failed") return text(`A transcrição falhou: ${r.error}`);
+      return text("Ainda transcrevendo. Leia a conversa de novo em alguns segundos.");
+    },
+  );
 }

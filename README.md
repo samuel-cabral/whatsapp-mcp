@@ -45,6 +45,48 @@ Two processes, split by who writes:
 - **macOS or Linux.** Developed on macOS; the launchd section is macOS only.
 - **Your phone**, to scan the pairing QR code.
 
+### Optional: voice note transcription
+
+Voice notes are transcribed locally, by whisper.cpp. Nothing is uploaded and no API key is
+involved. This is optional in the real sense: without it the daemon runs exactly as before
+and voice notes keep showing up as `(audio)`. Nothing else changes, and nothing fails.
+
+```bash
+brew install whisper-cpp ffmpeg
+```
+
+Then fetch a model (about 547 MB) into `~/.cache/whisper-models/`:
+
+```bash
+mkdir -p ~/.cache/whisper-models && curl -L -o ~/.cache/whisper-models/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+```
+
+The daemon checks all three at boot, says so in its log, and reports the answer through
+`whatsapp_status`. Paths and language come from `~/.whatsapp-mcp/config.json`, which is
+optional — these are the defaults:
+
+```json
+{
+  "whisperBin": "/opt/homebrew/bin/whisper-cli",
+  "ffmpegBin": "/opt/homebrew/bin/ffmpeg",
+  "whisperModel": "/Users/you/.cache/whisper-models/ggml-large-v3-turbo-q5_0.bin",
+  "whisperLanguage": "pt"
+}
+```
+
+The paths must be absolute. launchd hands the daemon a `PATH` of
+`/usr/bin:/bin:/usr/sbin:/sbin`, so a bare `whisper-cli` resolves in a terminal and fails
+every time as a service.
+
+`whisperLanguage` is `pt` rather than `auto` on measurement, not taste: a clearly Brazilian
+clip was auto-detected as English at p=0.91 and came back as nonsense, while an English
+clip transcribed identically under `-l pt`. Set it to your own language, or to `auto` if
+your inbox is genuinely mixed.
+
+Transcription is a guess, and it is labelled as one everywhere it appears: a transcribed
+note reads `(áudio, transcrito) …`, and any response containing one carries a one-line
+reminder not to act on a name, a number or an amount without checking.
+
 ## Setup
 
 ```bash
@@ -159,6 +201,7 @@ identical from the outside and lead to opposite conclusions.
 | `search_messages` | read | full-text search, accent-insensitive |
 | `get_contact` | read | resolve a name or number to a jid |
 | `whatsapp_status` | read | whether messages are still arriving, plus connection and sync |
+| `transcribe_audio` | write | transcribe one voice note by hand, or reprocess it |
 | `backfill_chat` | write | pull older history, 50 messages a page |
 | `draft_message` | write | prepare a message — **does not send** |
 | `confirm_send` | write | send a prepared draft — takes only a `draftId` |
