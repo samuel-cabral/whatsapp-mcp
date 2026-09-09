@@ -10,6 +10,20 @@ export interface Sender {
   fetchOlder(jid: string, pages: number): Promise<number>;
 }
 
+/**
+ * The transcription queue, as the control layer sees it. Kept out of Sender on
+ * purpose: Sender is the WhatsApp boundary, and transcription is local work that has
+ * nothing to do with which transport is underneath.
+ */
+export interface Transcriber {
+  request(chatJid: string, msgId: string, force: boolean): Promise<
+    | { state: "done"; text: string }
+    | { state: "failed"; error: string }
+    | { state: "running" }
+    | { state: "rejected"; error: string }
+  >;
+}
+
 export interface ControlDeps {
   db: DB;
   drafts: DraftStore;
@@ -17,6 +31,8 @@ export interface ControlDeps {
   connected: () => boolean;
   /** Live counters from the daemon. status runs in-process, so these need no disk. */
   health?: () => InboundHealth;
+  /** Absent when the preflight found no whisper, no ffmpeg or no model. */
+  transcriber?: Transcriber;
 }
 
 const fail = (error: string): ControlResponse => ({ ok: false, error });
@@ -86,6 +102,23 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         const fetched = await deps.sender.fetchOlder(c.jid, pages);
         setMeta(deps.db, "last_backfill_at", String(Math.floor(Date.now() / 1000)));
         return done({ fetched });
+      }
+
+      case "transcribe": {
+        if (typeof c.jid !== "string" || typeof c.msgId !== "string") {
+          return fail("transcribe exige jid e msgId");
+        }
+        // msgId alone identifies nothing: the uniqueness constraint is
+        // (chat_jid, msg_id), so without the jid this could transcribe the wrong
+        // person's message and hand back their words.
+        if (!deps.transcriber) {
+          return fail(
+            "transcrição indisponível: o daemon subiu sem o motor de transcrição. Veja whatsapp_status.",
+          );
+        }
+        const res = await deps.transcriber.request(c.jid, c.msgId, c.force === true);
+        if (res.state === "rejected") return fail(res.error);
+        return done(res);
       }
 
       default:
