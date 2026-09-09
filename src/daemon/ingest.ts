@@ -1,12 +1,18 @@
 import type { DB } from "../shared/migrations.js";
-import { toMessageRow } from "../shared/normalize.js";
+import { toAudioRef, toMessageRow } from "../shared/normalize.js";
 import { normalizeJid, isGroupJid, isUserJid } from "../shared/jid.js";
+
+export interface IngestResult {
+  written: number;
+  /** Voice notes newly queued for transcription. The caller wakes the worker. */
+  enqueued: number;
+}
 
 /**
  * Every write goes through ON CONFLICT so that replaying a history batch — which
  * WhatsApp does on every reconnect — converges instead of duplicating.
  */
-export function ingestMessages(db: DB, messages: unknown[]): number {
+export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
   const insertMsg = db.prepare(`
     INSERT INTO messages (chat_jid, msg_id, sender_jid, from_me, timestamp, type, text, quoted_id)
     VALUES (@chat_jid, @msg_id, @sender_jid, @from_me, @timestamp, @type, @text, @quoted_id)
@@ -41,8 +47,31 @@ export function ingestMessages(db: DB, messages: unknown[]): number {
     ON CONFLICT (jid) DO UPDATE SET push_name = excluded.push_name
   `);
 
+  /**
+   * Queueing lives inside the same transaction as the insert: outside it, a crash
+   * between writing the row and queueing it would leave the note as a permanent
+   * `(audio)` with no record that anything was owed.
+   *
+   * `transcript_status IS NULL` is what makes the history replay idempotent — a note
+   * already queued, running, done or failed is never reconsidered. The
+   * `transcription_since` comparison is the "only from here on" decision written as
+   * SQL, and it is also what keeps backfill_chat over a 2019 conversation from
+   * queueing hundreds of notes whose media the server no longer serves.
+   *
+   * None of the columns touched here appear in the `UPDATE OF` of messages_au, so
+   * this does not churn the FTS index.
+   */
+  const enqueueAudio = db.prepare(`
+    UPDATE messages
+       SET transcript_status = 'pending', transcript_attempts = 0, media_ref = @ref
+     WHERE chat_jid = @chat_jid AND msg_id = @msg_id
+       AND transcript_status IS NULL
+       AND timestamp >= (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'transcription_since')
+  `);
+
   const run = db.transaction((batch: unknown[]) => {
     let written = 0;
+    let enqueued = 0;
     for (const raw of batch) {
       const row = toMessageRow(raw);
       if (!row) continue;
@@ -63,9 +92,18 @@ export function ingestMessages(db: DB, messages: unknown[]): number {
       ) {
         learnPushName.run({ jid: row.sender_jid, push_name: pushName.trim() });
       }
+      const audio = row.type === "audio" ? toAudioRef(raw) : null;
+      if (audio) {
+        enqueued += enqueueAudio.run({
+          chat_jid: row.chat_jid,
+          msg_id: row.msg_id,
+          ref: JSON.stringify(audio),
+        }).changes;
+      }
+
       written++;
     }
-    return written;
+    return { written, enqueued };
   });
 
   return run(messages);
