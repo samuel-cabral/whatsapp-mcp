@@ -19,6 +19,10 @@ export interface MessageView {
   senderName: string | null;
   type: string;
   text: string | null;
+  /** Machine transcript of a voice note. "" means we listened and heard no speech. */
+  transcript: string | null;
+  transcriptStatus: string | null;
+  transcriptError: string | null;
 }
 
 /**
@@ -63,6 +67,14 @@ const TRANSCRIPT_COLS = (db: DB): string =>
     ? "m.transcript, m.transcript_status, m.transcript_error"
     : "NULL AS transcript, NULL AS transcript_status, NULL AS transcript_error";
 
+/**
+ * The chat list's preview line. NULLIF matters: an `empty` outcome stores the empty
+ * string, and "" is not caught by the `?? "(sem texto)"` on the render side, so a
+ * conversation whose last event was a silent voice note would show a blank line.
+ */
+const LAST_TEXT = (db: DB): string =>
+  hasTranscriptColumns(db) ? "COALESCE(m.text, NULLIF(m.transcript, ''))" : "m.text";
+
 function transcriptionStatus(db: DB): TranscriptionStatus {
   if (!hasTranscriptColumns(db)) {
     return {
@@ -105,7 +117,7 @@ export function listChats(db: DB, opts: { limit?: number; onlyUnread?: boolean }
     .prepare(`
       SELECT c.jid, COALESCE(c.name, ${NAME}) AS name,
              c.is_group, c.unread_count, c.last_message_at,
-             (SELECT m.text FROM messages m
+             (SELECT ${LAST_TEXT(db)} FROM messages m
                WHERE m.chat_jid = c.jid
                ORDER BY m.timestamp DESC LIMIT 1) AS last_text
         FROM chats c
@@ -135,6 +147,7 @@ export function readMessages(
   const rows = db
     .prepare(`
       SELECT m.msg_id, m.timestamp, m.from_me, m.sender_jid, m.type, m.text,
+             ${TRANSCRIPT_COLS(db)},
              ${NAME} AS sender_name
         FROM messages m
         LEFT JOIN contacts ct ON ct.jid = m.sender_jid
@@ -160,6 +173,9 @@ export function readMessages(
       senderName: r.sender_name,
       type: r.type,
       text: r.text,
+      transcript: r.transcript,
+      transcriptStatus: r.transcript_status,
+      transcriptError: r.transcript_error,
     }))
     .reverse();
 }
@@ -171,6 +187,7 @@ export function searchMessages(
   const rows = db
     .prepare(`
       SELECT m.msg_id, m.timestamp, m.from_me, m.sender_jid, m.type, m.text,
+             ${TRANSCRIPT_COLS(db)},
              m.chat_jid,
              COALESCE(c.name, cc.name, cc.push_name) AS chat_name,
              COALESCE(sc.name, sc.push_name) AS sender_name
@@ -200,6 +217,9 @@ export function searchMessages(
     senderName: r.sender_name,
     type: r.type,
     text: r.text,
+    transcript: r.transcript,
+    transcriptStatus: r.transcript_status,
+    transcriptError: r.transcript_error,
     chatJid: r.chat_jid,
     chatName: r.chat_name,
   }));

@@ -144,3 +144,60 @@ describe("confirm com WhatsApp desconectado", () => {
     expect(sendText).toHaveBeenCalledOnce();
   });
 });
+
+describe("comando transcribe", () => {
+  const base = (over: Record<string, unknown> = {}) => ({
+    db,
+    drafts: new DraftStore(),
+    sender: { sendText: async () => "S1", fetchOlder: async () => 0 },
+    connected: () => true,
+    ...over,
+  });
+
+  it("chama a fila com jid, msgId e force", async () => {
+    const calls: unknown[] = [];
+    const res = await handleCommand(
+      { cmd: "transcribe", jid: "5511@s.whatsapp.net", msgId: "A1", force: true },
+      base({
+        transcriber: {
+          request: async (jid: string, msgId: string, force: boolean) => {
+            calls.push([jid, msgId, force]);
+            return { state: "done" as const, text: "abacaxi" };
+          },
+        },
+      }) as any,
+    );
+    expect(calls[0]).toEqual(["5511@s.whatsapp.net", "A1", true]);
+    expect(res).toEqual({ ok: true, result: { state: "done", text: "abacaxi" } });
+  });
+
+  // The queue is absent whenever the preflight found no whisper, no ffmpeg or no
+  // model. That has to be a sentence, not a crash.
+  it("sem motor de transcrição, recusa explicando onde olhar", async () => {
+    const res = await handleCommand(
+      { cmd: "transcribe", jid: "5511@s.whatsapp.net", msgId: "A1", force: false },
+      base() as any,
+    );
+    expect(res.ok).toBe(false);
+    expect((res as any).error).toContain("whatsapp_status");
+  });
+
+  it("exige jid e msgId", async () => {
+    const t = { transcriber: { request: async () => ({ state: "done" as const, text: "" }) } };
+    expect((await handleCommand({ cmd: "transcribe", msgId: "A1" }, base(t) as any)).ok).toBe(false);
+    expect((await handleCommand({ cmd: "transcribe", jid: "x" }, base(t) as any)).ok).toBe(false);
+  });
+
+  it("a recusa da fila vira erro, não um resultado de sucesso vazio", async () => {
+    const res = await handleCommand(
+      { cmd: "transcribe", jid: "5511@s.whatsapp.net", msgId: "OLD", force: false },
+      base({
+        transcriber: {
+          request: async () => ({ state: "rejected" as const, error: "esse áudio é anterior à transcrição automática" }),
+        },
+      }) as any,
+    );
+    expect(res.ok).toBe(false);
+    expect((res as any).error).toContain("anterior à transcrição");
+  });
+});
