@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeJid, isGroupJid, isUserJid } from "../src/shared/jid.js";
-import { toMessageRow } from "../src/shared/normalize.js";
+import { toAudioRef, toMessageRow } from "../src/shared/normalize.js";
 
 describe("normalizeJid", () => {
   it("remove o sufixo de device", () => {
@@ -145,5 +145,75 @@ describe("timestamp inválido não derruba o lote", () => {
       message: { conversation: "oi" },
     });
     expect(r?.timestamp).toBe(1787845000);
+  });
+});
+
+describe("toAudioRef", () => {
+  const ptt = (over: Record<string, unknown> = {}) => ({
+    ...base,
+    message: {
+      audioMessage: {
+        ptt: true,
+        mediaKey: new Uint8Array([1, 2, 3, 4]),
+        directPath: "/v/t62.7117-24/abc123",
+        mimetype: "audio/ogg; codecs=opus",
+        seconds: 8,
+        ...over,
+      },
+    },
+  });
+
+  it("extrai o descritor de uma nota de voz", () => {
+    const ref = toAudioRef(ptt())!;
+    expect(ref.directPath).toBe("/v/t62.7117-24/abc123");
+    expect(ref.seconds).toBe(8);
+    expect(ref.mimetype).toBe("audio/ogg; codecs=opus");
+  });
+
+  it("guarda a mediaKey em base64, e ela sobrevive ao round-trip do media_ref", () => {
+    const ref = toAudioRef(ptt())!;
+    expect(ref.mediaKey).toBe(Buffer.from([1, 2, 3, 4]).toString("base64"));
+    const back = JSON.parse(JSON.stringify(ref));
+    expect(back.mediaKey).toBe(ref.mediaKey);
+    expect(back.directPath).toBe(ref.directPath);
+  });
+
+  it("aceita mediaKey que já veio como string base64", () => {
+    expect(toAudioRef(ptt({ mediaKey: "AQIDBA==" }))?.mediaKey).toBe("AQIDBA==");
+  });
+
+  // The whole point of the ptt gate: an hour of forwarded music is the worst case.
+  it("recusa áudio que não é nota de voz", () => {
+    expect(toAudioRef(ptt({ ptt: false }))).toBeNull();
+    expect(toAudioRef(ptt({ ptt: undefined }))).toBeNull();
+  });
+
+  it("recusa quando falta mediaKey ou directPath: não haveria como baixar depois", () => {
+    expect(toAudioRef(ptt({ mediaKey: undefined }))).toBeNull();
+    expect(toAudioRef(ptt({ mediaKey: new Uint8Array([]) }))).toBeNull();
+    expect(toAudioRef(ptt({ directPath: undefined }))).toBeNull();
+  });
+
+  it("enxerga a nota dentro de envelope efêmero e de view once", () => {
+    const inner = ptt().message;
+    expect(toAudioRef({ ...base, message: { ephemeralMessage: { message: inner } } })).not.toBeNull();
+    expect(toAudioRef({ ...base, message: { viewOnceMessageV2: { message: inner } } })).not.toBeNull();
+  });
+
+  it("degrada seconds ausente ou inválido para 0, sem estourar", () => {
+    expect(toAudioRef(ptt({ seconds: undefined }))?.seconds).toBe(0);
+    expect(toAudioRef(ptt({ seconds: "lixo" }))?.seconds).toBe(0);
+  });
+
+  it("não é nota de voz, não é áudio, não é mensagem: null", () => {
+    expect(toAudioRef({ ...base, message: { conversation: "oi" } })).toBeNull();
+    expect(toAudioRef({ ...base, message: null })).toBeNull();
+    expect(toAudioRef(null)).toBeNull();
+  });
+
+  it("a mensagem em si continua sem texto: a transcrição não passa por classify", () => {
+    const row = toMessageRow(ptt())!;
+    expect(row.type).toBe("audio");
+    expect(row.text).toBeNull();
   });
 });

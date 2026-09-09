@@ -26,7 +26,7 @@ const msg = (id: string, text: string, ts = 1754000000) => ({
 
 describe("ingestMessages", () => {
   it("grava mensagens novas", () => {
-    expect(ingestMessages(db, [msg("A", "um"), msg("B", "dois")])).toBe(2);
+    expect(ingestMessages(db, [msg("A", "um"), msg("B", "dois")])).toMatchObject({ written: 2 });
     const n = db.prepare("SELECT count(*) AS n FROM messages").get() as any;
     expect(n.n).toBe(2);
   });
@@ -42,7 +42,7 @@ describe("ingestMessages", () => {
   });
 
   it("ignora entradas que não normalizam, sem abortar o lote", () => {
-    expect(ingestMessages(db, [msg("A", "um"), { key: {}, message: null }])).toBe(1);
+    expect(ingestMessages(db, [msg("A", "um"), { key: {}, message: null }])).toMatchObject({ written: 1 });
   });
 
   it("cria o chat implicitamente e atualiza last_message_at", () => {
@@ -278,5 +278,82 @@ describe("recordHistoryProgress", () => {
   it("isLatest sozinho não marca nada: no Baileys ele é o primeiro lote, não o último", () => {
     recordHistoryProgress(db, { progress: null, isLatest: true } as any);
     expect(getMeta(db, "initial_sync_done")).toBeNull();
+  });
+});
+
+describe("enfileiramento de nota de voz", () => {
+  const voice = (id: string, ts = 1754000000) => ({
+    key: { remoteJid: "5511999999999@s.whatsapp.net", fromMe: false, id },
+    messageTimestamp: ts,
+    message: {
+      audioMessage: {
+        ptt: true,
+        mediaKey: new Uint8Array([9, 9, 9]),
+        directPath: "/v/t62/abc",
+        mimetype: "audio/ogg; codecs=opus",
+        seconds: 5,
+      },
+    },
+  });
+
+  const row = (id: string) =>
+    db.prepare("SELECT transcript_status, media_ref, transcript FROM messages WHERE msg_id = ?").get(id) as any;
+
+  // migrate() stamps transcription_since at "now minus a day", and every fixture in
+  // this file is dated 2025. Opening the window is what the cases below are about;
+  // the case that asserts the window itself closes it again explicitly.
+  beforeEach(() => setMeta(db, "transcription_since", "0"));
+
+  it("enfileira nota de voz nova com o descritor de mídia", () => {
+    expect(ingestMessages(db, [voice("V1")])).toMatchObject({ written: 1, enqueued: 1 });
+    const r = row("V1");
+    expect(r.transcript_status).toBe("pending");
+    expect(JSON.parse(r.media_ref).directPath).toBe("/v/t62/abc");
+  });
+
+  it("não enfileira o que é anterior a transcription_since", () => {
+    setMeta(db, "transcription_since", "9999999999");
+    expect(ingestMessages(db, [voice("V2")])).toMatchObject({ written: 1, enqueued: 0 });
+    expect(row("V2").transcript_status).toBeNull();
+  });
+
+  it("não enfileira áudio que não é nota de voz", () => {
+    const music = voice("V3");
+    (music.message.audioMessage as any).ptt = false;
+    expect(ingestMessages(db, [music])).toMatchObject({ enqueued: 0 });
+    expect(row("V3").transcript_status).toBeNull();
+  });
+
+  // WhatsApp re-delivers recent messages on every reconnect, and this daemon
+  // reconnects about every 30 minutes. Both halves matter: not queueing twice, and
+  // not erasing a transcript that already cost GPU time.
+  it("o replay do histórico não re-enfileira nem apaga a transcrição", () => {
+    ingestMessages(db, [voice("V4")]);
+    db.prepare(
+      "UPDATE messages SET transcript = 'abacaxi e bicicleta', transcript_status = 'done' WHERE msg_id = 'V4'",
+    ).run();
+
+    expect(ingestMessages(db, [voice("V4")])).toMatchObject({ written: 1, enqueued: 0 });
+
+    const r = row("V4");
+    expect(r.transcript).toBe("abacaxi e bicicleta");
+    expect(r.transcript_status).toBe("done");
+  });
+
+  it("a transcrição continua achável no FTS depois do replay", () => {
+    ingestMessages(db, [voice("V5")]);
+    db.prepare("UPDATE messages SET transcript = 'abacaxi', transcript_status = 'done' WHERE msg_id = 'V5'").run();
+    ingestMessages(db, [voice("V5")]);
+    const hit = db
+      .prepare("SELECT m.msg_id FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ?")
+      .all("abacaxi") as any[];
+    expect(hit.map((h) => h.msg_id)).toEqual(["V5"]);
+  });
+
+  it("uma nota que falhou não é re-enfileirada pelo replay", () => {
+    ingestMessages(db, [voice("V6")]);
+    db.prepare("UPDATE messages SET transcript_status = 'failed' WHERE msg_id = 'V6'").run();
+    expect(ingestMessages(db, [voice("V6")])).toMatchObject({ enqueued: 0 });
+    expect(row("V6").transcript_status).toBe("failed");
   });
 });

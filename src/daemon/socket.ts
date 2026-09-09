@@ -262,7 +262,7 @@ export async function createConnection(opts: {
     sock.ev.on("messaging-history.set", ({ messages, chats, contacts, progress }) => {
       ingestChats(db, chats ?? []);
       ingestContacts(db, contacts ?? []);
-      const n = ingestMessages(db, messages ?? []);
+      const { written: n } = ingestMessages(db, messages ?? []);
       const done = recordHistoryProgress(db, { progress });
       const pct = typeof progress === "number" ? ` ${progress}%` : "";
       console.error(`[whatsapp-daemon] history: +${n} mensagens${pct}${done ? " (sync inicial completo)" : ""}`);

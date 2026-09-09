@@ -1,6 +1,6 @@
 import { assessInbound, type InboundHealth } from "../shared/health.js";
 import type { DB } from "../shared/migrations.js";
-import type { ContactRow, SyncStatus } from "../shared/types.js";
+import type { ContactRow, SyncStatus, TranscriptionStatus } from "../shared/types.js";
 
 export interface ChatSummary {
   jid: string;
@@ -29,6 +29,63 @@ export interface MessageView {
 const NAME = "COALESCE(ct.name, ct.push_name)";
 
 export type SearchHit = MessageView & { chatJid: string; chatName: string | null };
+
+/**
+ * Whether this database has the v2 transcription columns.
+ *
+ * The MCP process opens the store read-only and never migrates it (db.ts), so it can
+ * legitimately be pointed at a v1 file: `npm run build` followed by a not-yet-restarted
+ * daemon is exactly that window. Without this probe every read tool would die with
+ * `no such column: transcript` — all eight of them, over a feature that is meant to
+ * degrade quietly.
+ *
+ * Cached per handle, not per process: vitest runs one process per test FILE and the
+ * read tests build a fresh :memory: database in each beforeEach, so a module-level
+ * boolean would freeze the answer for whichever database happened to be first and
+ * make those tests pass or fail by ordering.
+ */
+const transcriptSupport = new WeakMap<DB, boolean>();
+
+export function hasTranscriptColumns(db: DB): boolean {
+  const cached = transcriptSupport.get(db);
+  if (cached !== undefined) return cached;
+  const row = db
+    .prepare("SELECT count(*) AS n FROM pragma_table_info('messages') WHERE name = 'transcript'")
+    .get() as { n: number };
+  const ok = row.n > 0;
+  transcriptSupport.set(db, ok);
+  return ok;
+}
+
+/** Selected in place of the real columns against a v1 store. */
+const TRANSCRIPT_COLS = (db: DB): string =>
+  hasTranscriptColumns(db)
+    ? "m.transcript, m.transcript_status, m.transcript_error"
+    : "NULL AS transcript, NULL AS transcript_status, NULL AS transcript_error";
+
+function transcriptionStatus(db: DB): TranscriptionStatus {
+  if (!hasTranscriptColumns(db)) {
+    return {
+      engineOk: false,
+      engineError: "o banco ainda está no schema v1; reinicie o daemon para migrar.",
+      pending: 0,
+      failed: 0,
+    };
+  }
+  const meta = (key: string): string | null => {
+    const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  };
+  const count = (status: string): number =>
+    (db.prepare("SELECT count(*) AS n FROM messages WHERE transcript_status = ?").get(status) as any).n;
+
+  return {
+    engineOk: meta("transcription_engine_ok") === "1",
+    engineError: meta("transcription_engine_error"),
+    pending: count("pending"),
+    failed: count("failed"),
+  };
+}
 
 /**
  * The query text is written by a model and may contain quotes or FTS5 operators.
@@ -191,6 +248,7 @@ export function getSyncStatus(db: DB, connected: boolean, health?: InboundHealth
     lastConnectedAt: last?.value ? Number(last.value) : null,
     lastInboundAt,
     lastInboundIngestAt: ingest?.value ? Number(ingest.value) : null,
+    transcription: transcriptionStatus(db),
     inbound: assessInbound({
       now: Math.floor(Date.now() / 1000),
       lastInboundMsgTs: lastInboundAt,
