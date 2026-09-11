@@ -24,7 +24,7 @@ const boot = async (socketFile: string) => {
     deps: {
       db,
       drafts: new DraftStore(),
-      sender: { sendText: vi.fn(async () => "SENT"), fetchOlder: vi.fn(async () => 0) },
+      sender: { sendText: vi.fn(async () => "SENT"), fetchOlder: vi.fn(async () => ({ asked: 0, stopped: "exhausted" as const })) },
       connected: () => true,
     },
   });

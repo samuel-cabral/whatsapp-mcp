@@ -19,7 +19,8 @@ import {
   markInboundIngested,
   setMeta,
 } from "./ingest.js";
-import { planBackfill } from "./backfill.js";
+import { runBackfill } from "./backfill.js";
+import { PAGE_SIZE, type BackfillOutcome } from "../shared/backfill-limits.js";
 import { normalizeJid } from "../shared/jid.js";
 import { makeTtlCache } from "../shared/ttl-cache.js";
 import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.js";
@@ -347,18 +348,13 @@ export async function createConnection(opts: {
       return Buffer.concat(chunks);
     },
 
-    async fetchOlder(jid: string, pages: number): Promise<number> {
-      // Results arrive asynchronously through messaging-history.set; this only
-      // asks. The caller learns the outcome from the growing message count.
-      let asked = 0;
-      for (let i = 0; i < pages; i++) {
-        const cursor = planBackfill(db, jid);
-        if (!cursor) break;
-        await sock.fetchMessageHistory(50, { remoteJid: jid, id: cursor.msgId, fromMe: false }, cursor.ts);
-        asked += 50;
-        await new Promise((r) => setTimeout(r, 1_500)); // human-paced, avoids tripping rate limits
-      }
-      return asked;
+    // Results arrive asynchronously through messaging-history.set; this only asks.
+    // The caller learns the outcome from the growing message count — and from
+    // `stopped`, which says whether the request was served or merely started.
+    fetchOlder(jid: string, pages: number): Promise<BackfillOutcome> {
+      return runBackfill(db, jid, pages, (cursor) =>
+        sock.fetchMessageHistory(PAGE_SIZE, { remoteJid: jid, id: cursor.msgId, fromMe: false }, cursor.ts)
+          .then(() => undefined));
     },
 
     async close(): Promise<void> {

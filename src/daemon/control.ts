@@ -3,11 +3,12 @@ import type { DB } from "../shared/migrations.js";
 import type { ControlResponse } from "../shared/types.js";
 import { getSyncStatus } from "../mcp/queries.js";
 import { setMeta } from "./ingest.js";
+import { MAX_BACKFILL_PAGES, type BackfillOutcome } from "../shared/backfill-limits.js";
 import type { DraftStore } from "./drafts.js";
 
 export interface Sender {
   sendText(jid: string, text: string): Promise<string>;
-  fetchOlder(jid: string, pages: number): Promise<number>;
+  fetchOlder(jid: string, pages: number): Promise<BackfillOutcome>;
 }
 
 /**
@@ -98,10 +99,10 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
       case "backfill": {
         if (typeof c.jid !== "string") return fail("backfill exige jid");
         if (!deps.connected()) return fail("WhatsApp desconectado — backfill indisponível.");
-        const pages = Number.isInteger(c.pages) && c.pages > 0 ? Math.min(c.pages, 20) : 1;
-        const fetched = await deps.sender.fetchOlder(c.jid, pages);
+        const pages = Number.isInteger(c.pages) && c.pages > 0 ? Math.min(c.pages, MAX_BACKFILL_PAGES) : 1;
+        const outcome = await deps.sender.fetchOlder(c.jid, pages);
         setMeta(deps.db, "last_backfill_at", String(Math.floor(Date.now() / 1000)));
-        return done({ fetched });
+        return done({ fetched: outcome.asked, stopped: outcome.stopped });
       }
 
       case "transcribe": {

@@ -18,7 +18,7 @@ beforeEach(() => {
   db.prepare("INSERT INTO chats (jid, name) VALUES (?, ?)").run(IGOR, "Igor");
   drafts = new DraftStore();
   sendText = vi.fn(async () => "SENT1");
-  fetchOlder = vi.fn(async () => 50);
+  fetchOlder = vi.fn(async () => ({ asked: 50, stopped: "pages" as const }));
   deps = { db, drafts, sender: { sendText, fetchOlder }, connected: () => true };
 });
 
@@ -149,7 +149,7 @@ describe("comando transcribe", () => {
   const base = (over: Record<string, unknown> = {}) => ({
     db,
     drafts: new DraftStore(),
-    sender: { sendText: async () => "S1", fetchOlder: async () => 0 },
+    sender: { sendText: async () => "S1", fetchOlder: async () => ({ asked: 0, stopped: "exhausted" as const }) },
     connected: () => true,
     ...over,
   });
