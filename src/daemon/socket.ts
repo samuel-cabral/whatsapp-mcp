@@ -352,9 +352,16 @@ export async function createConnection(opts: {
     // The caller learns the outcome from the growing message count — and from
     // `stopped`, which says whether the request was served or merely started.
     fetchOlder(jid: string, pages: number): Promise<BackfillOutcome> {
+      // The proto field is oldestMsgTimestampMs. The store keeps seconds, and seconds
+      // handed over as milliseconds ask for everything older than January 1970 —
+      // a request the phone answers with silence, which is what every backfill
+      // before this line got.
       return runBackfill(db, jid, pages, (cursor) =>
-        sock.fetchMessageHistory(PAGE_SIZE, { remoteJid: jid, id: cursor.msgId, fromMe: false }, cursor.ts)
-          .then(() => undefined));
+        sock.fetchMessageHistory(
+          PAGE_SIZE,
+          { remoteJid: jid, id: cursor.msgId, fromMe: cursor.fromMe },
+          cursor.ts * 1000,
+        ).then(() => undefined));
     },
 
     async close(): Promise<void> {

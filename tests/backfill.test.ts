@@ -28,7 +28,15 @@ describe("planBackfill", () => {
       { key: { remoteJid: IGOR, fromMe: false, id: "NEW" }, messageTimestamp: 5000, message: { conversation: "b" } },
       { key: { remoteJid: IGOR, fromMe: false, id: "OLD" }, messageTimestamp: 1000, message: { conversation: "a" } },
     ]);
-    expect(planBackfill(db, IGOR)).toEqual({ msgId: "OLD", ts: 1000 });
+    expect(planBackfill(db, IGOR)).toEqual({ msgId: "OLD", ts: 1000, fromMe: false });
+  });
+
+  it("carrega o fromMe da mensagem mais antiga, porque ele faz parte da chave", () => {
+    ingestMessages(db, [
+      { key: { remoteJid: IGOR, fromMe: false, id: "NEW" }, messageTimestamp: 5000, message: { conversation: "b" } },
+      { key: { remoteJid: IGOR, fromMe: true, id: "MINE" }, messageTimestamp: 1000, message: { conversation: "a" } },
+    ]);
+    expect(planBackfill(db, IGOR)).toEqual({ msgId: "MINE", ts: 1000, fromMe: true });
   });
 
   it("devolve null quando o chat está marcado como completo", () => {
