@@ -8,7 +8,13 @@ import {
 
 export interface BackfillCursor {
   msgId: string;
+  /** Unix seconds, as stored. The wire wants milliseconds; the caller converts. */
   ts: number;
+  /**
+   * Part of the key, not decoration: WhatsApp matches (id, fromMe) together, and
+   * asking for "older than message X, not mine" when X is mine names nothing.
+   */
+  fromMe: boolean;
 }
 
 /** Injectable so a test does not have to spend twenty real seconds proving the budget. */
@@ -29,12 +35,19 @@ export const realClock: BackfillClock = {
  */
 export function planBackfill(db: DB, jid: string): BackfillCursor | null {
   const row = db
-    .prepare("SELECT oldest_msg_id, oldest_ts, complete FROM sync_state WHERE chat_jid = ?")
-    .get(jid) as { oldest_msg_id: string | null; oldest_ts: number | null; complete: number } | undefined;
+    .prepare(`
+      SELECT s.oldest_msg_id, s.oldest_ts, s.complete, m.from_me
+        FROM sync_state s
+        LEFT JOIN messages m ON m.chat_jid = s.chat_jid AND m.msg_id = s.oldest_msg_id
+       WHERE s.chat_jid = ?
+    `)
+    .get(jid) as
+    | { oldest_msg_id: string | null; oldest_ts: number | null; complete: number; from_me: number | null }
+    | undefined;
 
   if (!row || row.complete === 1) return null;
   if (!row.oldest_msg_id || row.oldest_ts === null) return null;
-  return { msgId: row.oldest_msg_id, ts: row.oldest_ts };
+  return { msgId: row.oldest_msg_id, ts: row.oldest_ts, fromMe: row.from_me === 1 };
 }
 
 /**
