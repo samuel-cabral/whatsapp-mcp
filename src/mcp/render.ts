@@ -19,6 +19,12 @@ export interface Renderable {
 const shortId = (id: string): string => (id.length > 12 ? `${id.slice(0, 12)}…` : id);
 
 export function renderBody(m: Renderable): string {
+  // An image carries its id even when it has a caption: the caption alone reads as a
+  // text message, and then nobody knows there is a picture to ask download_image for.
+  if (m.type === "image") {
+    const tag = `(imagem, id ${shortId(m.id)})`;
+    return m.text ? `${tag} ${m.text}` : tag;
+  }
   if (m.text !== null && m.text !== "") return m.text;
   if (m.type !== "audio") return `(${m.type})`;
 
@@ -33,9 +39,9 @@ export function renderBody(m: Renderable): string {
     case "failed":
       return `(áudio, transcrição falhou: ${m.transcriptError ?? "motivo desconhecido"}, id ${shortId(m.id)})`;
     default:
-      // Everything from before this feature, and every audio that is not a voice note.
-      // Unchanged on purpose: there is no transcript and none is coming.
-      return "(audio)";
+      // Never queued: a forwarded mp3, or a voice note from before this feature. No
+      // transcript is coming on its own, but transcribe_audio can be asked by id.
+      return `(audio, id ${shortId(m.id)})`;
   }
 }
 

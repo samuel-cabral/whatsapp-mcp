@@ -248,14 +248,23 @@ describe("request: a tool manual", () => {
     expect(res).toEqual({ state: "done", text: "segunda" });
   });
 
-  it("recusa áudio antigo, que não tem mídia guardada", async () => {
+  it("transcreve sob demanda um áudio que a fila automática não pegou", async () => {
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?,?,?,'audio',?)")
+      .run("5511@s.whatsapp.net", "MP3", 1000, JSON.stringify({ mediaKey: "AQI=", directPath: "/v", mimetype: "audio/mpeg", seconds: 30 }));
+    const q = build();
+    const res = await q.request("5511@s.whatsapp.net", "MP3", false);
+    q.stop();
+    expect(res).toEqual({ state: "done", text: "abacaxi" });
+  });
+
+  it("recusa áudio sem descritor de mídia", async () => {
     db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type) VALUES (?,?,?,'audio')")
       .run("5511@s.whatsapp.net", "OLD", 1000);
     const q = build();
     const res = await q.request("5511@s.whatsapp.net", "OLD", false);
     q.stop();
     expect(res.state).toBe("rejected");
-    expect((res as any).error).toContain("anterior à transcrição automática");
+    expect((res as any).error).toContain("ouça no celular");
   });
 
   it("recusa mensagem que não é áudio e mensagem inexistente", async () => {

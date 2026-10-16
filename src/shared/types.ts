@@ -34,6 +34,16 @@ export interface AudioRef {
   seconds: number;
 }
 
+/**
+ * What downloadContentFromMessage needs to fetch one image again. Same reasoning as
+ * AudioRef for leaving out `url` and the hashes; `seconds` has no meaning here.
+ */
+export interface ImageRef {
+  mediaKey: string;
+  directPath: string;
+  mimetype: string;
+}
+
 export interface ChatRow {
   jid: string;
   name: string | null;
@@ -78,6 +88,7 @@ export type ControlCommand =
   | { cmd: "confirm"; draftId: string }
   | { cmd: "backfill"; jid: string; pages: number }
   | { cmd: "transcribe"; jid: string; msgId: string; force: boolean }
+  | { cmd: "download_image"; jid: string; msgId: string }
   | { cmd: "status" };
 
 export type ControlResponse =

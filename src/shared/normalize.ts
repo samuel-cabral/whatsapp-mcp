@@ -1,5 +1,5 @@
 import { normalizeJid, isGroupJid } from "./jid.js";
-import type { AudioRef, MessageRow, MessageType } from "./types.js";
+import type { AudioRef, ImageRef, MessageRow, MessageType } from "./types.js";
 
 /**
  * Baileys returns timestamps as number, Long, or numeric string depending on the
@@ -96,13 +96,17 @@ function toBase64(value: unknown): string | null {
  *
  * Goes through the same unwrap() as classify, so a voice note inside an
  * ephemeralMessage or a viewOnceMessage counts.
+ *
+ * `anyAudio` lifts the ptt gate. Ingest uses it to keep the descriptor of every
+ * audio, so transcribe_audio can be asked for a forwarded mp3 by hand, while the
+ * automatic queue still only ever sees voice notes.
  */
-export function toAudioRef(msg: unknown): AudioRef | null {
+export function toAudioRef(msg: unknown, opts: { anyAudio?: boolean } = {}): AudioRef | null {
   const message = (msg as any)?.message;
   if (!message) return null;
 
   const node = unwrap(message)?.audioMessage;
-  if (!node || node.ptt !== true) return null;
+  if (!node || (node.ptt !== true && !opts.anyAudio)) return null;
 
   const mediaKey = toBase64(node.mediaKey);
   const directPath = typeof node.directPath === "string" ? node.directPath : null;
@@ -116,6 +120,25 @@ export function toAudioRef(msg: unknown): AudioRef | null {
     // The sender writes this field, so it is a hint, not a measurement. It only ever
     // feeds the timeout budget, and a missing one degrades to 0, i.e. the floor.
     seconds: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : 0,
+  };
+}
+
+/** The download descriptor for an image, or null for everything else. */
+export function toImageRef(msg: unknown): ImageRef | null {
+  const message = (msg as any)?.message;
+  if (!message) return null;
+
+  const node = unwrap(message)?.imageMessage;
+  if (!node) return null;
+
+  const mediaKey = toBase64(node.mediaKey);
+  const directPath = typeof node.directPath === "string" ? node.directPath : null;
+  if (!mediaKey || !directPath) return null;
+
+  return {
+    mediaKey,
+    directPath,
+    mimetype: typeof node.mimetype === "string" ? node.mimetype : "image/jpeg",
   };
 }
 

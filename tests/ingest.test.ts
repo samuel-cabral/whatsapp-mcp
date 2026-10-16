@@ -324,6 +324,37 @@ describe("enfileiramento de nota de voz", () => {
     expect(row("V3").transcript_status).toBeNull();
   });
 
+  // Not queued, but kept: transcribe_audio can be asked for it by hand.
+  it("guarda o descritor do áudio que não é nota de voz, sem enfileirar", () => {
+    const music = voice("V3b");
+    (music.message.audioMessage as any).ptt = false;
+    ingestMessages(db, [music]);
+    expect(row("V3b").transcript_status).toBeNull();
+    expect(JSON.parse(row("V3b").media_ref).directPath).toBe("/v/t62/abc");
+  });
+
+  it("guarda o descritor de imagem", () => {
+    ingestMessages(db, [{
+      key: { remoteJid: "5511999999999@s.whatsapp.net", fromMe: false, id: "I1" },
+      messageTimestamp: 1754000000,
+      message: { imageMessage: { mediaKey: new Uint8Array([1, 2]), directPath: "/v/img", mimetype: "image/jpeg", caption: "olha" } },
+    }]);
+    const r = row("I1");
+    expect(r.transcript_status).toBeNull();
+    expect(JSON.parse(r.media_ref)).toEqual({ mediaKey: "AQI=", directPath: "/v/img", mimetype: "image/jpeg" });
+  });
+
+  it("o replay preenche o descritor que faltava e não troca o que já existe", () => {
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type) VALUES (?, 'V9', 1754000000, 'audio')")
+      .run("5511999999999@s.whatsapp.net");
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?, 'V10', 1754000000, 'audio', '{\"keep\":1}')")
+      .run("5511999999999@s.whatsapp.net");
+    const old = (id: string) => { const v = voice(id); (v.message.audioMessage as any).ptt = false; return v; };
+    ingestMessages(db, [old("V9"), old("V10")]);
+    expect(JSON.parse(row("V9").media_ref).directPath).toBe("/v/t62/abc");
+    expect(row("V10").media_ref).toBe('{"keep":1}');
+  });
+
   // WhatsApp re-delivers recent messages on every reconnect, and this daemon
   // reconnects about every 30 minutes. Both halves matter: not queueing twice, and
   // not erasing a transcript that already cost GPU time.

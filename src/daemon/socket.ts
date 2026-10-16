@@ -27,9 +27,10 @@ import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.
 import type { InboundHealth } from "../shared/health.js";
 import type { Sender } from "./control.js";
 import type { MediaFetcher } from "./audio-queue.js";
-import type { AudioRef } from "../shared/types.js";
+import type { ImageFetcher } from "./media.js";
+import type { AudioRef, ImageRef } from "../shared/types.js";
 
-export interface WhatsAppConnection extends Sender, MediaFetcher {
+export interface WhatsAppConnection extends Sender, MediaFetcher, ImageFetcher {
   isConnected(): boolean;
   health(): InboundHealth;
   close(): Promise<void>;
@@ -342,6 +343,17 @@ export async function createConnection(opts: {
       const stream = await downloadContentFromMessage(
         { mediaKey: Buffer.from(ref.mediaKey, "base64"), directPath: ref.directPath },
         "audio",
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
+    },
+
+    /** Same path as fetchAudio, for the same reasons. Only the media type differs. */
+    async fetchImage(ref: ImageRef): Promise<Buffer> {
+      const stream = await downloadContentFromMessage(
+        { mediaKey: Buffer.from(ref.mediaKey, "base64"), directPath: ref.directPath },
+        "image",
       );
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(chunk as Buffer);

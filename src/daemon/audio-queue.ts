@@ -279,12 +279,15 @@ export function createAudioQueue(deps: QueueDeps): AudioQueue {
 
     if (!row) return { state: "rejected", error: `não achei a mensagem ${msgId} em ${chatJid}.` };
     if (row.type !== "audio") return { state: "rejected", error: "essa mensagem não é um áudio." };
-    if (row.transcript_status === null || !row.media_ref) {
+    // A NULL status with a ref is an audio the automatic queue never takes on (a
+    // forwarded mp3, or a voice note from before transcription_since): asked for by
+    // name, it gets queued like any other. Only a missing ref is a dead end.
+    if (!row.media_ref) {
       return {
         state: "rejected",
         error:
-          "esse áudio é anterior à transcrição automática, então o daemon não guardou a mídia dele. " +
-          "Só dá para transcrever áudio recebido depois que a transcrição entrou.",
+          "o daemon não guardou o descritor de mídia desse áudio: ele chegou antes de o daemon passar a guardar. " +
+          "Só dá para transcrever o que chegar daqui para frente; ouça no celular.",
       };
     }
     if (row.transcript_status === "done" && !force) {
