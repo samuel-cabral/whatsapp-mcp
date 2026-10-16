@@ -5,6 +5,7 @@ import { getSyncStatus } from "../mcp/queries.js";
 import { setMeta } from "./ingest.js";
 import { MAX_BACKFILL_PAGES, type BackfillOutcome } from "../shared/backfill-limits.js";
 import type { DraftStore } from "./drafts.js";
+import { resolveMsgId, saveImage, type ImageFetcher } from "./media.js";
 
 export interface Sender {
   sendText(jid: string, text: string): Promise<string>;
@@ -34,6 +35,8 @@ export interface ControlDeps {
   health?: () => InboundHealth;
   /** Absent when the preflight found no whisper, no ffmpeg or no model. */
   transcriber?: Transcriber;
+  /** Where download_image saves to, and what fetches the bytes. */
+  images?: { fetcher: ImageFetcher; dir: string };
 }
 
 const fail = (error: string): ControlResponse => ({ ok: false, error });
@@ -117,9 +120,22 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
             "transcrição indisponível: o daemon subiu sem o motor de transcrição. Veja whatsapp_status.",
           );
         }
-        const res = await deps.transcriber.request(c.jid, c.msgId, c.force === true);
+        const id = resolveMsgId(deps.db, c.jid, c.msgId);
+        if ("error" in id) return fail(id.error);
+        const res = await deps.transcriber.request(c.jid, id.msgId, c.force === true);
         if (res.state === "rejected") return fail(res.error);
         return done(res);
+      }
+
+      case "download_image": {
+        if (typeof c.jid !== "string" || typeof c.msgId !== "string") {
+          return fail("download_image exige jid e msgId");
+        }
+        if (!deps.images) return fail("download de imagem indisponível neste daemon.");
+        const id = resolveMsgId(deps.db, c.jid, c.msgId);
+        if ("error" in id) return fail(id.error);
+        const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, c.jid, id.msgId);
+        return res.ok ? done(res.image) : fail(res.error);
       }
 
       default:

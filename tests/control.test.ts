@@ -146,6 +146,13 @@ describe("confirm com WhatsApp desconectado", () => {
 });
 
 describe("comando transcribe", () => {
+  // The daemon resolves the id against the store before the queue sees it, so the
+  // messages under test have to exist.
+  beforeEach(() => {
+    const ins = db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type) VALUES (?, ?, 1000, 'audio')");
+    for (const id of ["A1", "OLD", "3ADC70F22431B26B9AB8"]) ins.run("5511@s.whatsapp.net", id);
+  });
+
   const base = (over: Record<string, unknown> = {}) => ({
     db,
     drafts: new DraftStore(),
@@ -199,5 +206,46 @@ describe("comando transcribe", () => {
     );
     expect(res.ok).toBe(false);
     expect((res as any).error).toContain("anterior à transcrição");
+  });
+
+  // read_messages shows the id cut at 12 characters with "…", and that is what the
+  // model copies into the next call.
+  it("aceita o id cortado que a leitura mostra", async () => {
+    const calls: unknown[] = [];
+    await handleCommand(
+      { cmd: "transcribe", jid: "5511@s.whatsapp.net", msgId: "3ADC70F22431…", force: false },
+      base({
+        transcriber: {
+          request: async (_j: string, msgId: string) => {
+            calls.push(msgId);
+            return { state: "running" as const };
+          },
+        },
+      }) as any,
+    );
+    expect(calls).toEqual(["3ADC70F22431B26B9AB8"]);
+  });
+
+  it("recusa prefixo ambíguo em vez de adivinhar", async () => {
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type) VALUES (?, ?, 1000, 'audio')")
+      .run("5511@s.whatsapp.net", "3ADC70F22431FFFFFFFF");
+    const request = vi.fn();
+    const res = await handleCommand(
+      { cmd: "transcribe", jid: "5511@s.whatsapp.net", msgId: "3ADC70F22431…", force: false },
+      base({ transcriber: { request } }) as any,
+    );
+    expect(res.ok).toBe(false);
+    expect((res as any).error).toContain("ambíguo");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("não casa prefixo de outra conversa", async () => {
+    const request = vi.fn();
+    const res = await handleCommand(
+      { cmd: "transcribe", jid: "5599@s.whatsapp.net", msgId: "3ADC70F22431…", force: false },
+      base({ transcriber: { request } }) as any,
+    );
+    expect(res.ok).toBe(false);
+    expect(request).not.toHaveBeenCalled();
   });
 });

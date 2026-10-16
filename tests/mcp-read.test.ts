@@ -31,11 +31,11 @@ function textOf(res: any): string {
 }
 
 describe("tools de leitura", () => {
-  it("expõe as nove tools", async () => {
+  it("expõe as dez tools", async () => {
     const client = await connectClient(db);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
-      "backfill_chat", "confirm_send", "draft_message", "get_contact",
+      "backfill_chat", "confirm_send", "download_image", "draft_message", "get_contact",
       "list_chats", "read_messages", "search_messages", "transcribe_audio", "whatsapp_status",
     ]);
   });
@@ -211,12 +211,12 @@ describe("como o áudio chega ao modelo", () => {
     expect(await read()).toContain("(áudio, sem fala reconhecida)");
   });
 
-  // The ~8.8k notes already in the store have no media descriptor, so nothing is
-  // coming for them and the line must not promise otherwise.
-  it("o áudio anterior à feature continua exatamente como era", async () => {
+  // Nothing is coming for an audio the queue never took, so the line must not promise
+  // a transcript — but it carries the id, because transcribe_audio can be asked by hand.
+  it("áudio fora da fila mostra o id e não promete transcrição", async () => {
     audio("OLD1");
     const out = await read();
-    expect(out).toContain("(audio)");
+    expect(out).toContain("(audio, id OLD1)");
     expect(out).not.toContain("transcrevendo");
   });
 

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ToolContext } from "./read.js";
@@ -62,10 +63,10 @@ export function registerWriteTools(server: McpServer, ctx: ToolContext): void {
 
   server.tool(
     "transcribe_audio",
-    "Transcreve um áudio específico com o whisper local. Use quando a leitura mostrar " +
-      "(áudio, transcrevendo) parado ou (áudio, transcrição falhou). Só funciona para áudio recebido " +
-      "depois que a transcrição automática entrou: os antigos não têm mídia guardada. Já transcrito, " +
-      "devolve o texto guardado sem reprocessar, a menos que force.",
+    "Transcreve um áudio específico com o whisper local: nota de voz ou áudio encaminhado (mp3 etc.). " +
+      "Use quando a leitura mostrar (audio, id …), (áudio, transcrevendo) parado ou (áudio, transcrição " +
+      "falhou). Aceita o id cortado que a leitura mostra. Já transcrito, devolve o texto guardado sem " +
+      "reprocessar, a menos que force.",
     {
       jid: z.string(),
       // Both, always: the store's uniqueness is (chat_jid, msg_id), so a msgId on its
@@ -85,4 +86,33 @@ export function registerWriteTools(server: McpServer, ctx: ToolContext): void {
       return text("Ainda transcrevendo. Leia a conversa de novo em alguns segundos.");
     },
   );
+
+  server.tool(
+    "download_image",
+    "Baixa uma imagem de uma conversa, salva em ~/.whatsapp-mcp/media e devolve a imagem para você ver. " +
+      "Use com o id que a leitura mostra em (imagem, id …); o id cortado serve.",
+    { jid: z.string(), msgId: z.string() },
+    async ({ jid, msgId }) => {
+      const res = await ctx.client.send({ cmd: "download_image", jid, msgId });
+      if (!res.ok) return text(`Imagem não baixada: ${res.error}`);
+
+      const r = res.result as { path: string; mimetype: string; bytes: number };
+      const saved = `Salva em ${r.path} (${Math.round(r.bytes / 1024)} KB).`;
+      // Above this the client rejects the inline image anyway; the file on disk is still
+      // the deliverable, so say where it is instead of failing the whole call.
+      if (!INLINE_MIME.has(r.mimetype) || r.bytes > MAX_INLINE_BYTES) {
+        return text(`${saved} Grande demais ou formato que não dá para mostrar aqui.`);
+      }
+      const data = (await readFile(r.path)).toString("base64");
+      return {
+        content: [
+          { type: "image" as const, data, mimeType: r.mimetype },
+          { type: "text" as const, text: saved },
+        ],
+      };
+    },
+  );
 }
+
+const INLINE_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_INLINE_BYTES = 5 * 1024 * 1024;

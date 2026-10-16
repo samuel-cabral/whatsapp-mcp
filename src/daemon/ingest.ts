@@ -1,5 +1,5 @@
 import type { DB } from "../shared/migrations.js";
-import { toAudioRef, toMessageRow } from "../shared/normalize.js";
+import { toAudioRef, toImageRef, toMessageRow } from "../shared/normalize.js";
 import { normalizeJid, isGroupJid, isUserJid } from "../shared/jid.js";
 
 export interface IngestResult {
@@ -69,6 +69,18 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
        AND timestamp >= (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'transcription_since')
   `);
 
+  /**
+   * The descriptor alone, with no queueing: images, audio that is not a voice note,
+   * and voice notes older than transcription_since. It is what download_image and a
+   * manual transcribe_audio need. Only fills a NULL, so it never overwrites the ref a
+   * queued note already carries, and the history replay that every reconnect brings
+   * is what backfills it onto messages stored before this existed.
+   */
+  const keepMediaRef = db.prepare(`
+    UPDATE messages SET media_ref = @ref
+     WHERE chat_jid = @chat_jid AND msg_id = @msg_id AND media_ref IS NULL
+  `);
+
   const run = db.transaction((batch: unknown[]) => {
     let written = 0;
     let enqueued = 0;
@@ -92,14 +104,16 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
       ) {
         learnPushName.run({ jid: row.sender_jid, push_name: pushName.trim() });
       }
-      const audio = row.type === "audio" ? toAudioRef(raw) : null;
-      if (audio) {
-        enqueued += enqueueAudio.run({
-          chat_jid: row.chat_jid,
-          msg_id: row.msg_id,
-          ref: JSON.stringify(audio),
-        }).changes;
+      const key = { chat_jid: row.chat_jid, msg_id: row.msg_id };
+      const voice = row.type === "audio" ? toAudioRef(raw) : null;
+      if (voice) {
+        enqueued += enqueueAudio.run({ ...key, ref: JSON.stringify(voice) }).changes;
       }
+      const media =
+        row.type === "audio" ? toAudioRef(raw, { anyAudio: true })
+        : row.type === "image" ? toImageRef(raw)
+        : null;
+      if (media) keepMediaRef.run({ ...key, ref: JSON.stringify(media) });
 
       written++;
     }

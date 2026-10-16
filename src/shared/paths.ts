@@ -9,6 +9,8 @@ export interface Paths {
   socketFile: string;
   configFile: string;
   tmpDir: string;
+  /** Images saved by download_image. Never swept: the user asked for these files. */
+  mediaDir: string;
 }
 
 /** All state lives under a single directory so it can be inspected or wiped as one unit. */
@@ -21,6 +23,7 @@ export function resolvePaths(home: string = homedir()): Paths {
     socketFile: join(root, "control.sock"),
     configFile: join(root, "config.json"),
     tmpDir: join(root, "tmp"),
+    mediaDir: join(root, "media"),
   };
 }
 
@@ -31,8 +34,10 @@ export function resolvePaths(home: string = homedir()): Paths {
 export function ensureDirs(paths: Paths): void {
   mkdirSync(paths.root, { recursive: true, mode: 0o700 });
   mkdirSync(paths.authDir, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.mediaDir, { recursive: true, mode: 0o700 });
   chmodSync(paths.root, 0o700);
   chmodSync(paths.authDir, 0o700);
+  chmodSync(paths.mediaDir, 0o700);
 }
 
 /**

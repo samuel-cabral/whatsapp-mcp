@@ -123,3 +123,26 @@ describe("transcribe_audio", () => {
     expect(out).toContain("anterior à transcrição automática");
   });
 });
+
+describe("download_image", () => {
+  it("devolve a imagem para o modelo ver e diz onde salvou", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const file = join(mkdtempSync(join(tmpdir(), "wa-img-")), "I1.jpg");
+    writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff]));
+    const client = await connectWith(async (cmd) => {
+      expect(cmd).toEqual({ cmd: "download_image", jid: IGOR, msgId: "I1" });
+      return { ok: true, result: { path: file, mimetype: "image/jpeg", bytes: 3 } };
+    });
+    const res: any = await client.callTool({ name: "download_image", arguments: { jid: IGOR, msgId: "I1" } });
+    expect(res.content[0]).toEqual({ type: "image", data: "/9j/", mimeType: "image/jpeg" });
+    expect(res.content[1].text).toContain(file);
+  });
+
+  it("repassa a recusa do daemon como texto", async () => {
+    const client = await connectWith(async () => ({ ok: false, error: "essa mensagem não é uma imagem (é text)." }));
+    const res: any = await client.callTool({ name: "download_image", arguments: { jid: IGOR, msgId: "T1" } });
+    expect(textOf(res)).toContain("não é uma imagem");
+  });
+});
