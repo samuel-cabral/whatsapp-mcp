@@ -15,6 +15,7 @@ import {
   ingestChatUpdates,
   ingestContacts,
   ingestGroupSubjects,
+  ingestLidMappings,
   recordHistoryProgress,
   markInboundIngested,
   setMeta,
@@ -301,6 +302,9 @@ export async function createConnection(opts: {
     // address book actually lands, and it arrives as a partial — which is why
     // ingestContacts coalesces instead of overwriting with null.
     sock.ev.on("contacts.update", (updates) => ingestContacts(db, updates ?? []));
+    // Fired when someone who reached us as a lid shares their number with us.
+    // Baileys 7 replaced chats.phoneNumberShare ({ lid, jid }) with this ({ lid, pn }).
+    sock.ev.on("lid-mapping.update", ({ lid, pn }) => ingestLidMappings(db, [{ lid, jid: pn }]));
     sock.ev.on("groups.upsert", (groups) => ingestGroupSubjects(db, groups ?? []));
     sock.ev.on("groups.update", (groups) => ingestGroupSubjects(db, groups ?? []));
   };
