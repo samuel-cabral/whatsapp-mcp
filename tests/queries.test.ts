@@ -130,4 +130,21 @@ describe("getSyncStatus", () => {
     setMeta(db, "initial_sync_done", "1");
     expect(getSyncStatus(db, false).initialSyncDone).toBe(true);
   });
+
+  it("lastInboundAt ignora status@broadcast e newsletters, que continuam chegando com o resto surdo", () => {
+    ingestMessages(db, [
+      { key: { remoteJid: "status@broadcast", fromMe: false, id: "S1", participant: IGOR }, messageTimestamp: 9000, message: { conversation: "status de alguém" } },
+      { key: { remoteJid: "120363165208277417@newsletter", fromMe: false, id: "N1" }, messageTimestamp: 9500, message: { conversation: "boletim" } },
+    ]);
+    expect(getSyncStatus(db, true).lastInboundAt).toBe(3000);
+  });
+
+  it("lastInboundAt é null quando só há status e newsletters", () => {
+    const vazio = new Database(":memory:");
+    migrate(vazio);
+    ingestMessages(vazio, [
+      { key: { remoteJid: "status@broadcast", fromMe: false, id: "S1", participant: IGOR }, messageTimestamp: 9000, message: { conversation: "status" } },
+    ]);
+    expect(getSyncStatus(vazio, true).lastInboundAt).toBeNull();
+  });
 });

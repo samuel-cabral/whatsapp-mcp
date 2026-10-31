@@ -410,9 +410,17 @@ export function getSyncStatus(db: DB, connected: boolean, health?: InboundHealth
   const done = db.prepare("SELECT value FROM meta WHERE key = 'initial_sync_done'").get() as any;
   const last = db.prepare("SELECT value FROM meta WHERE key = 'last_connected_at'").get() as any;
   const ingest = db.prepare("SELECT value FROM meta WHERE key = 'last_inbound_ingest_at'").get() as any;
-  // Uses idx_messages_ts; measured at 0,2 ms against 151.987 rows.
-  const inb = db.prepare("SELECT MAX(timestamp) AS t FROM messages WHERE from_me = 0").get() as any;
-  const lastInboundAt = inb?.t ? Number(inb.t) : null; // MAX() de conjunto vazio é NULL
+  // Só conversas reais. status@broadcast e newsletters continuam chegando quando o resto
+  // está surdo, e foi isso que fez este status dizer "recebendo: sim" por 2 horas em
+  // 30/10/2026. ORDER BY ... LIMIT 1 anda no idx_messages_ts em vez de varrer a tabela.
+  const inb = db
+    .prepare(
+      `SELECT timestamp AS t FROM messages
+       WHERE from_me = 0 AND chat_jid NOT LIKE '%@broadcast' AND chat_jid NOT LIKE '%@newsletter'
+       ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get() as any;
+  const lastInboundAt = inb?.t ? Number(inb.t) : null; // sem linhas: undefined, vira null
 
   return {
     connected,
