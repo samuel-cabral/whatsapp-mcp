@@ -124,7 +124,7 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         }
         const id = resolveMsgId(deps.db, c.jid, c.msgId);
         if ("error" in id) return fail(id.error);
-        const res = await deps.transcriber.request(c.jid, id.msgId, c.force === true);
+        const res = await deps.transcriber.request(id.chatJid, id.msgId, c.force === true);
         if (res.state === "rejected") return fail(res.error);
         return done(res);
       }
@@ -136,7 +136,7 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         if (!deps.images) return fail("download de imagem indisponível neste daemon.");
         const id = resolveMsgId(deps.db, c.jid, c.msgId);
         if ("error" in id) return fail(id.error);
-        const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, c.jid, id.msgId);
+        const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, id.chatJid, id.msgId);
         return res.ok ? done(res.image) : fail(res.error);
       }
 
@@ -147,7 +147,7 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         if (!deps.documents) return fail("download de documento indisponível neste daemon.");
         const id = resolveMsgId(deps.db, c.jid, c.msgId);
         if ("error" in id) return fail(id.error);
-        const res = await saveDocument(deps.db, deps.documents.fetcher, deps.documents.dir, c.jid, id.msgId);
+        const res = await saveDocument(deps.db, deps.documents.fetcher, deps.documents.dir, id.chatJid, id.msgId);
         return res.ok ? done(res.document) : fail(res.error);
       }
 

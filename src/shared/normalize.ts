@@ -142,6 +142,12 @@ export function toImageRef(msg: unknown): ImageRef | null {
   };
 }
 
+/** fileLength arrives as number, Long or numeric string; anything else is unknown. */
+function declaredLength(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof (v as any)?.toNumber === "function" ? (v as any).toNumber() : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** The download descriptor for a document, or null for everything else. */
 export function toDocumentRef(msg: unknown): DocumentRef | null {
   const message = (msg as any)?.message;
@@ -159,6 +165,7 @@ export function toDocumentRef(msg: unknown): DocumentRef | null {
     directPath,
     mimetype: typeof node.mimetype === "string" ? node.mimetype : "application/octet-stream",
     fileName: typeof node.fileName === "string" && node.fileName.trim() !== "" ? node.fileName : null,
+    ...(declaredLength(node.fileLength) !== null ? { fileLength: declaredLength(node.fileLength)! } : {}),
   };
 }
 

@@ -54,6 +54,8 @@ export interface DocumentRef {
   directPath: string;
   mimetype: string;
   fileName: string | null;
+  /** Size the sender declared, when present; lets the daemon refuse before downloading. */
+  fileLength?: number;
 }
 
 export interface ChatRow {

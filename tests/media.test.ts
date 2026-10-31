@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate, type DB } from "../src/shared/migrations.js";
-import { saveDocument, saveImage } from "../src/daemon/media.js";
+import { resolveMsgId, saveDocument, saveImage, MAX_DOCUMENT_BYTES } from "../src/daemon/media.js";
 
 const CHAT = "5511@s.whatsapp.net";
 const REF = JSON.stringify({ mediaKey: "AQI=", directPath: "/v/img", mimetype: "image/jpeg" });
@@ -98,5 +98,41 @@ describe("saveDocument", () => {
   it("404 vira 'não serve mais'", async () => {
     const fetcher = { fetchDocument: vi.fn(async () => { throw new Error("stream: 404"); }) };
     expect(((await saveDocument(db, fetcher, dir, CHAT, "D1")) as any).error).toContain("não serve mais");
+  });
+});
+
+describe("resolveMsgId com lid", () => {
+  const LID = "9988@lid";
+
+  it("acha a mensagem guardada sob o lid quando o chamador passa o numero", () => {
+    db.prepare("INSERT INTO lid_map (lid, pn) VALUES (?, ?)").run(LID, CHAT);
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?, ?, 1000, 'image', ?)").run(LID, "L1ABCDEFGH", REF);
+    expect(resolveMsgId(db, CHAT, "L1ABCDEFGH")).toEqual({ msgId: "L1ABCDEFGH", chatJid: LID });
+    expect(resolveMsgId(db, CHAT, "L1ABCDEF…")).toEqual({ msgId: "L1ABCDEFGH", chatJid: LID });
+  });
+
+  it("sem vinculo no lid_map a busca continua restrita a conversa", () => {
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?, ?, 1000, 'image', ?)").run(LID, "L2ABCDEFGH", REF);
+    expect("error" in resolveMsgId(db, CHAT, "L2ABCDEFGH")).toBe(true);
+  });
+
+  it("mensagem arquivada sob os dois jids devolve a copia que ainda tem o descritor", () => {
+    db.prepare("INSERT INTO lid_map (lid, pn) VALUES (?, ?)").run(LID, CHAT);
+    const ins = db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?, ?, 1000, 'image', ?)");
+    ins.run(CHAT, "L3ABCDEFGH", null);
+    ins.run(LID, "L3ABCDEFGH", REF);
+    expect(resolveMsgId(db, CHAT, "L3ABCDEFGH")).toEqual({ msgId: "L3ABCDEFGH", chatJid: LID });
+  });
+});
+
+describe("saveDocument: limite de tamanho", () => {
+  it("recusa pelo tamanho declarado sem baixar nada", async () => {
+    const big = JSON.stringify({ mediaKey: "AQI=", directPath: "/v/d", mimetype: "application/pdf", fileName: "x.pdf", fileLength: MAX_DOCUMENT_BYTES + 1 });
+    db.prepare("INSERT INTO messages (chat_jid, msg_id, timestamp, type, media_ref) VALUES (?, 'BIG', 1000, 'document', ?)").run(CHAT, big);
+    const fetcher = { fetchDocument: vi.fn() };
+    const res: any = await saveDocument(db, fetcher, dir, CHAT, "BIG");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("grande demais");
+    expect(fetcher.fetchDocument).not.toHaveBeenCalled();
   });
 });

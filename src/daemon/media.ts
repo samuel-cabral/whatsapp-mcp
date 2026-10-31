@@ -2,6 +2,7 @@ import { existsSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DB } from "../shared/migrations.js";
 import type { DocumentRef, ImageRef } from "../shared/types.js";
+import { aliasesOf } from "../mcp/queries.js";
 
 /**
  * Fetches the bytes of one image. Declared here and implemented in socket.ts, like
@@ -35,10 +36,18 @@ export function resolveMsgId(
   db: DB,
   chatJid: string,
   given: string,
-): { msgId: string } | { error: string } {
+): { msgId: string; chatJid: string } | { error: string } {
   const id = given.trim().replace(/(…|\.\.\.)$/, "");
-  const exact = db.prepare("SELECT 1 FROM messages WHERE chat_jid = ? AND msg_id = ?").get(chatJid, id);
-  if (exact) return { msgId: id };
+  // The model passes the jid the read side showed, which is the phone number; the
+  // message itself may be filed under the person's lid. Look in every alias and hand
+  // back the one that holds it, preferring a copy that still has its media descriptor
+  // (a history replay can file one message under both).
+  const aliases = JSON.stringify(aliasesOf(db, chatJid));
+  const pick = `ORDER BY (media_ref IS NOT NULL) DESC, (chat_jid = @jid) DESC`;
+  const exact = db
+    .prepare(`SELECT chat_jid FROM messages WHERE msg_id = @id AND chat_jid IN (SELECT value FROM json_each(@aliases)) ${pick} LIMIT 1`)
+    .get({ id, aliases, jid: chatJid }) as { chat_jid: string } | undefined;
+  if (exact) return { msgId: id, chatJid: exact.chat_jid };
 
   // Ids are alphanumeric; anything else is not a prefix we know how to match safely
   // (a % or _ would turn LIKE into a wildcard).
@@ -46,10 +55,13 @@ export function resolveMsgId(
     return { error: `não achei a mensagem ${given} em ${chatJid}.` };
   }
   const rows = db
-    .prepare("SELECT msg_id FROM messages WHERE chat_jid = ? AND msg_id LIKE ? LIMIT 2")
-    .all(chatJid, `${id}%`) as Array<{ msg_id: string }>;
-  if (rows.length === 1) return { msgId: rows[0].msg_id };
-  if (rows.length > 1) return { error: `o id ${given} é ambíguo nessa conversa; passe o id completo.` };
+    .prepare(
+      `SELECT msg_id, chat_jid FROM messages WHERE msg_id LIKE @like AND chat_jid IN (SELECT value FROM json_each(@aliases)) ${pick} LIMIT 20`,
+    )
+    .all({ like: `${id}%`, aliases, jid: chatJid }) as Array<{ msg_id: string; chat_jid: string }>;
+  const ids = [...new Set(rows.map((r) => r.msg_id))];
+  if (ids.length === 1) return { msgId: ids[0], chatJid: rows.find((r) => r.msg_id === ids[0])!.chat_jid };
+  if (ids.length > 1) return { error: `o id ${given} é ambíguo nessa conversa; passe o id completo.` };
   return { error: `não achei a mensagem ${given} em ${chatJid}.` };
 }
 
@@ -126,6 +138,9 @@ export async function saveImage(
   return { ok: true, image: { path, mimetype, bytes: bytes.length } };
 }
 
+/** A document is buffered whole in memory; past this the daemon refuses instead of risking an OOM. */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
 export type SavedDocument = { path: string; mimetype: string; bytes: number; fileName: string | null };
 
 /** The sender picks the file name, so only a plain basename-ish stem survives. */
@@ -186,6 +201,13 @@ export async function saveDocument(
 
   if (existsSync(path)) {
     return { ok: true, document: { path, mimetype, bytes: statSync(path).size, fileName } };
+  }
+
+  if (ref.fileLength !== undefined && ref.fileLength > MAX_DOCUMENT_BYTES) {
+    return {
+      ok: false,
+      error: `documento grande demais (${Math.round(ref.fileLength / 1048576)} MB, limite ${MAX_DOCUMENT_BYTES / 1048576} MB); abra no celular.`,
+    };
   }
 
   let bytes: Buffer;

@@ -28,7 +28,7 @@ import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.
 import type { InboundHealth } from "../shared/health.js";
 import type { Sender } from "./control.js";
 import type { MediaFetcher } from "./audio-queue.js";
-import type { DocumentFetcher, ImageFetcher } from "./media.js";
+import { MAX_DOCUMENT_BYTES, type DocumentFetcher, type ImageFetcher } from "./media.js";
 import type { AudioRef, DocumentRef, ImageRef } from "../shared/types.js";
 
 export interface WhatsAppConnection extends Sender, MediaFetcher, ImageFetcher, DocumentFetcher {
@@ -371,7 +371,13 @@ export async function createConnection(opts: {
         "document",
       );
       const chunks: Buffer[] = [];
-      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      let size = 0;
+      for await (const chunk of stream) {
+        size += (chunk as Buffer).length;
+        // The declared size can lie; this is the cap that actually protects memory.
+        if (size > MAX_DOCUMENT_BYTES) throw new Error("documento passou do limite de tamanho");
+        chunks.push(chunk as Buffer);
+      }
       return Buffer.concat(chunks);
     },
 

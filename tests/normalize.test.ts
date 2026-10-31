@@ -228,6 +228,12 @@ describe("toDocumentRef", () => {
     expect(toDocumentRef(doc({}))).toEqual({ mediaKey: "AQI=", directPath: "/v/d", mimetype: "application/pdf", fileName: "a.pdf" });
   });
 
+  it("guarda o tamanho declarado, venha como numero ou como Long", () => {
+    expect(toDocumentRef(doc({ fileLength: 2048 }))?.fileLength).toBe(2048);
+    expect(toDocumentRef(doc({ fileLength: { toNumber: () => 4096 } }))?.fileLength).toBe(4096);
+    expect(toDocumentRef(doc({}))).not.toHaveProperty("fileLength");
+  });
+
   it("enxerga documento dentro de ephemeralMessage", () => {
     expect(toDocumentRef(doc({}, "ephemeralMessage"))).not.toBeNull();
   });
