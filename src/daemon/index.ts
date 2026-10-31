@@ -16,6 +16,21 @@ import { setMeta } from "./ingest.js";
 import type { DB } from "../shared/migrations.js";
 
 /**
+ * libsignal (a Baileys dependency) console.info()s whole SessionEntry objects —
+ * "Closing session:", "Opening session:", "Removing old closed session:" — private
+ * keys and root keys included. launchd sends stdout and stderr to daemon.log, so
+ * those dumps used to land on disk. Drop exactly those calls; let the rest through.
+ */
+const SESSION_DUMP = /^(Closing|Opening) session:|^Removing old closed session:/;
+for (const level of ["log", "info", "warn", "error", "debug"] as const) {
+  const original = console[level].bind(console);
+  console[level] = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && SESSION_DUMP.test(args[0])) return;
+    original(...args);
+  };
+}
+
+/**
  * Checks the transcription toolchain before connecting.
  *
  * Absolute paths are not a style choice: launchd hands this process a PATH of
