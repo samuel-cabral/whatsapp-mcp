@@ -1,45 +1,11 @@
-import type { BinaryNode } from "@whiskeysockets/baileys";
 import type { InboundHealth } from "../shared/health.js";
 
 /** proto.WebMessageInfo.StubType.CIPHERTEXT — the stub Baileys leaves behind when
  * decryption throws (Utils/decode-wa-message.js:184-188). The message still arrives
  * in messages.upsert; only its content is missing. */
-export const STUB_CIPHERTEXT = 2;
+const STUB_CIPHERTEXT = 2;
 
 const HOUR_MS = 60 * 60_000;
-
-/** NACK_REASONS.ParsingError (Utils/decode-wa-message.js:7-8), the code Baileys itself
- * sends for the one decrypt failure it does reject. */
-const NACK_PARSING_ERROR = "487";
-
-/** Baileys already nacks this one (messages-recv.js:651-653); nacking it twice is noise. */
-const MISSING_KEYS_ERROR_TEXT = "Key used already or never filled";
-
-/**
- * The reject for a stanza we could not decrypt, mirroring sendMessageAck
- * (messages-recv.js:35-61) so the server sees the same shape Baileys would send.
- *
- * Why it must exist: for every decrypt failure except "Key used already", Baileys
- * answers with a retry receipt and never acks the stanza. The server counts it as
- * still undelivered, replays it on every login with offline=1, and holds the offline
- * batch open: `ib,,offline` never arrives and live traffic stops with it. Nine such
- * stanzas from 13:33 to 13:41 kept this store deaf for the rest of the afternoon,
- * across two restarts, because each login replayed the same nine.
- *
- * Returns null when there is nothing to reject: the stanza is not a message, or it
- * was not the decrypt that failed.
- */
-export function nackForUndecryptable(node: BinaryNode, stubParameters: unknown): BinaryNode | null {
-  const { id, from, participant, recipient, type } = node.attrs;
-  if (node.tag !== "message" || !id || !from) return null;
-  if (Array.isArray(stubParameters) && stubParameters[0] === MISSING_KEYS_ERROR_TEXT) return null;
-
-  const attrs: Record<string, string> = { id, to: from, class: "message", error: NACK_PARSING_ERROR };
-  if (participant) attrs.participant = participant;
-  if (recipient) attrs.recipient = recipient;
-  if (type) attrs.type = type;
-  return { tag: "ack", attrs };
-}
 
 export interface UpsertTally {
   decrypted: number;

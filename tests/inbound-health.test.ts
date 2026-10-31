@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tallyUpsert, nackForUndecryptable, InboundHealthTracker, SessionRepairQueue } from "../src/daemon/health.js";
+import { tallyUpsert, InboundHealthTracker, SessionRepairQueue } from "../src/daemon/health.js";
 
 const inbound = (id: string, text: string, ts = 1787845000) => ({
   key: { remoteJid: "5511@s.whatsapp.net", fromMe: false, id },
@@ -103,32 +103,5 @@ describe("SessionRepairQueue", () => {
 
   it("fica vazia quando ninguém está pendente", () => {
     expect(new SessionRepairQueue().take(1000)).toEqual([]);
-  });
-});
-
-describe("nackForUndecryptable", () => {
-  const stanza = {
-    tag: "message",
-    attrs: { id: "ABC", from: "231683622203536@lid", recipient: "26680471105689@lid", type: "text" },
-  };
-
-  it("mirrors the stanza's own addressing so the server can match it", () => {
-    expect(nackForUndecryptable(stanza, ["No matching sessions found for message"])).toEqual({
-      tag: "ack",
-      attrs: { id: "ABC", to: "231683622203536@lid", class: "message", error: "487", recipient: "26680471105689@lid", type: "text" },
-    });
-  });
-
-  it("carries the group participant", () => {
-    const group = { tag: "message", attrs: { id: "G1", from: "1203@g.us", participant: "8322@lid" } };
-    expect(nackForUndecryptable(group, [])?.attrs.participant).toBe("8322@lid");
-  });
-
-  it("leaves the case Baileys already rejects alone", () => {
-    expect(nackForUndecryptable(stanza, ["Key used already or never filled"])).toBeNull();
-  });
-
-  it("ignores anything that is not a message stanza", () => {
-    expect(nackForUndecryptable({ tag: "receipt", attrs: { id: "R", from: "x" } }, [])).toBeNull();
   });
 });
