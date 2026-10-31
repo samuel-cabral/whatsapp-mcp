@@ -31,24 +31,24 @@ describe("lidPair", () => {
 });
 
 describe("aprendendo o vínculo no ingest", () => {
-  it("lê sender_pn de uma mensagem recebida numa conversa lid", () => {
+  it("lê remoteJidAlt de uma mensagem recebida numa conversa lid", () => {
     ingestMessages(db, [
-      { key: { remoteJid: LID, fromMe: false, id: "A", senderPn: PN }, messageTimestamp: 1, message: { conversation: "oi" } },
+      { key: { remoteJid: LID, fromMe: false, id: "A", remoteJidAlt: PN }, messageTimestamp: 1, message: { conversation: "oi" } },
     ]);
     expect(lidMap()).toEqual([{ lid: LID, pn: PN }]);
   });
 
-  it("ignora sender_pn de mensagem minha, que descreve a mim e não a outra pessoa", () => {
+  it("ignora remoteJidAlt de mensagem minha, que descreve a mim e não a outra pessoa", () => {
     ingestMessages(db, [
-      { key: { remoteJid: LID, fromMe: true, id: "B", senderPn: OUTRO }, messageTimestamp: 1, message: { conversation: "oi" } },
+      { key: { remoteJid: LID, fromMe: true, id: "B", remoteJidAlt: OUTRO }, messageTimestamp: 1, message: { conversation: "oi" } },
     ]);
     expect(lidMap()).toEqual([]);
   });
 
-  it("lê participant_pn de mensagem de grupo", () => {
+  it("lê participantAlt de mensagem de grupo", () => {
     ingestMessages(db, [
       {
-        key: { remoteJid: "123-456@g.us", fromMe: false, id: "G", participant: LID, participantPn: PN },
+        key: { remoteJid: "123-456@g.us", fromMe: false, id: "G", participant: LID, participantAlt: PN },
         messageTimestamp: 1,
         message: { conversation: "oi" },
       },
@@ -61,11 +61,15 @@ describe("aprendendo o vínculo no ingest", () => {
     expect(lidMap()).toEqual([{ lid: LID, pn: PN }]);
 
     db.exec("DELETE FROM lid_map");
+    ingestContacts(db, [{ id: LID, phoneNumber: PN, notify: "Thais" }]);
+    expect(lidMap()).toEqual([{ lid: LID, pn: PN }]);
+
+    db.exec("DELETE FROM lid_map");
     ingestChats(db, [{ id: LID, pnJid: PN }]);
     expect(lidMap()).toEqual([{ lid: LID, pn: PN }]);
   });
 
-  it("evento phoneNumberShare", () => {
+  it("evento lid-mapping.update ({ lid, pn })", () => {
     ingestLidMappings(db, [{ lid: LID, jid: PN }]);
     expect(lidMap()).toEqual([{ lid: LID, pn: PN }]);
   });
@@ -82,7 +86,7 @@ describe("leitura unificada", () => {
       { key: { remoteJid: PN, fromMe: false, id: "OLD" }, messageTimestamp: 100, message: { conversation: "edital antigo" } },
       // the same message replayed under the lid chat
       { key: { remoteJid: LID, fromMe: false, id: "OLD" }, messageTimestamp: 100, message: { conversation: "edital antigo" } },
-      { key: { remoteJid: LID, fromMe: false, id: "NEW", senderPn: PN }, messageTimestamp: 200, message: { conversation: "edital novo" } },
+      { key: { remoteJid: LID, fromMe: false, id: "NEW", remoteJidAlt: PN }, messageTimestamp: 200, message: { conversation: "edital novo" } },
     ]);
   });
 

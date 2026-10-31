@@ -111,18 +111,15 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
     let enqueued = 0;
     for (const raw of batch) {
       // Read before toMessageRow can skip the message: a stub or a reaction with no
-      // storable body still carries the server's sender_pn/sender_lid attributes.
-      // sender_pn/sender_lid describe whoever sent the stanza. On a message of ours
-      // relayed from another device that is us, while remoteJid is the other person,
-      // so pairing them would map a friend's lid to our own number.
+      // storable body still carries the sender's other address. Baileys fills
+      // remoteJidAlt (1:1) and participantAlt (group) from the stanza's sender_pn /
+      // sender_lid, which describe whoever sent it. On a message of ours relayed from
+      // another device that is us, while remoteJid is the other person, so pairing
+      // them would map a friend's lid to our own number.
       const k = (raw as any)?.key;
       if (k) {
-        if (!k.fromMe) {
-          learnLid(k.remoteJid, k.senderPn);
-          learnLid(k.remoteJid, k.senderLid);
-        }
-        learnLid(k.participant, k.participantPn);
-        learnLid(k.participant, k.participantLid);
+        if (!k.fromMe) learnLid(k.remoteJid, k.remoteJidAlt);
+        learnLid(k.participant, k.participantAlt);
       }
 
       const row = toMessageRow(raw);
@@ -302,10 +299,10 @@ export function ingestContacts(db: DB, contacts: unknown[]): number {
     for (const raw of batch) {
       const c = raw as any;
       if (!c?.id) continue;
-      // Baileys' Contact has an `id` in either form plus optional `lid` and `jid`.
+      // Baileys' Contact has an `id` in either form plus optional `lid` and `phoneNumber`.
       learnLid(c.id, c.lid);
-      learnLid(c.id, c.jid);
-      learnLid(c.lid, c.jid);
+      learnLid(c.id, c.phoneNumber);
+      learnLid(c.lid, c.phoneNumber);
       stmt.run({
         jid: normalizeJid(c.id),
         name: c.name ?? c.verifiedName ?? null,
