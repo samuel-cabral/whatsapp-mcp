@@ -17,11 +17,11 @@ import type { DB } from "../shared/migrations.js";
 
 /**
  * libsignal (a Baileys dependency) console.info()s whole SessionEntry objects —
- * "Closing session:", "Opening session:", "Removing old closed session:" — private
+ * "Closing session:", "Opening session:", "Removing old closed session:", "Session already closed" — private
  * keys and root keys included. launchd sends stdout and stderr to daemon.log, so
  * those dumps used to land on disk. Drop exactly those calls; let the rest through.
  */
-const SESSION_DUMP = /^(Closing|Opening) session:|^Removing old closed session:/;
+const SESSION_DUMP = /^(Closing|Opening) session:|^Removing old closed session:|^Session already closed/;
 for (const level of ["log", "info", "warn", "error", "debug"] as const) {
   const original = console[level].bind(console);
   console[level] = (...args: unknown[]) => {
