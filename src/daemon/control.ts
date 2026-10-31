@@ -1,7 +1,7 @@
 import type { InboundHealth } from "../shared/health.js";
 import type { DB } from "../shared/migrations.js";
 import type { ControlResponse } from "../shared/types.js";
-import { getSyncStatus } from "../mcp/queries.js";
+import { aliasesOf, getSyncStatus } from "../mcp/queries.js";
 import { setMeta } from "./ingest.js";
 import { MAX_BACKFILL_PAGES, type BackfillOutcome } from "../shared/backfill-limits.js";
 import type { DraftStore } from "./drafts.js";
@@ -45,14 +45,19 @@ const fail = (error: string): ControlResponse => ({ ok: false, error });
 const done = (result: unknown): ControlResponse => ({ ok: true, result });
 
 function chatName(db: DB, jid: string): string | null | undefined {
+  // get_contact hands out the phone-number jid, but the chat may be filed under the
+  // person's lid. Accept any alias, and prefer the row that actually has a name.
+  const aliases = JSON.stringify(aliasesOf(db, jid));
   const row = db
     .prepare(`
       SELECT COALESCE(c.name, ct.name, ct.push_name) AS name
         FROM chats c
         LEFT JOIN contacts ct ON ct.jid = c.jid
-       WHERE c.jid = ?
+       WHERE c.jid IN (SELECT value FROM json_each(?))
+       ORDER BY (COALESCE(c.name, ct.name, ct.push_name) IS NOT NULL) DESC
+       LIMIT 1
     `)
-    .get(jid) as { name: string | null } | undefined;
+    .get(aliases) as { name: string | null } | undefined;
   return row ? row.name : undefined;
 }
 
