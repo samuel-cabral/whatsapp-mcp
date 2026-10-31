@@ -1,4 +1,5 @@
 import makeWASocket, {
+  type BinaryNode,
   DisconnectReason,
   downloadContentFromMessage,
   getBinaryNodeChild,
@@ -24,7 +25,7 @@ import { runBackfill } from "./backfill.js";
 import { PAGE_SIZE, type BackfillOutcome } from "../shared/backfill-limits.js";
 import { normalizeJid } from "../shared/jid.js";
 import { makeTtlCache } from "../shared/ttl-cache.js";
-import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.js";
+import { InboundHealthTracker, SessionRepairQueue, STUB_CIPHERTEXT, nackForUndecryptable, tallyUpsert } from "./health.js";
 import type { InboundHealth } from "../shared/health.js";
 import type { Sender } from "./control.js";
 import type { MediaFetcher } from "./audio-queue.js";
@@ -52,6 +53,9 @@ export const PREKEY_FLOOR = 25;
 /** How often to look at the event buffer, and how long it may stay stuck. */
 export const FLUSH_CHECK_MS = 5_000;
 export const FLUSH_GRACE_MS = 30_000;
+
+/** Bound on stanzas held while waiting for their upsert; a leak guard, not a tuning knob. */
+const MAX_TRACKED_STANZAS = 500;
 
 /**
  * Why this is a decision and not just an upload: uploadPreKeys mints brand new
@@ -93,6 +97,10 @@ export async function createConnection(opts: {
 
   // Survives reconnects on purpose — see the note at makeWASocket.
   const msgRetryCounterCache = makeTtlCache(60 * 60_000);
+  // The upsert carries a key, not the stanza, and the ack needs the stanza's own
+  // from/participant/recipient/type (a message of ours relayed from the phone has
+  // from = our lid, which the key no longer says). Kept only until its upsert.
+  const stanzas = new Map<string, BinaryNode>();
   const healthTracker = new InboundHealthTracker();
   const repairQueue = new SessionRepairQueue();
 
@@ -221,6 +229,30 @@ export async function createConnection(opts: {
     flushTimer.unref();
   };
 
+  /**
+   * Tells the server to stop replaying stanzas we failed to decrypt — see
+   * nackForUndecryptable. Runs on the flushed upsert, so it also covers the ones that
+   * sat in the buffer. A failed send is not fatal: the stanza is simply replayed and
+   * rejected again on the next login.
+   */
+  const rejectUndecryptable = async (batch: unknown[]): Promise<void> => {
+    for (const raw of batch) {
+      const m = raw as any;
+      const id: unknown = m?.key?.id;
+      if (m?.messageStubType !== STUB_CIPHERTEXT || typeof id !== "string") continue;
+      const stanza = stanzas.get(id);
+      stanzas.delete(id);
+      const nack = stanza && nackForUndecryptable(stanza, m.messageStubParameters);
+      if (!nack) continue;
+      try {
+        await sock.sendNode(nack);
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        console.error(`[whatsapp-daemon] não deu para rejeitar ${id}: ${why}`);
+      }
+    }
+  };
+
   const start = (): void => {
     sock = makeWASocket({
       auth: state,
@@ -237,6 +269,14 @@ export async function createConnection(opts: {
     });
 
     startFlushWatchdog();
+
+    stanzas.clear();
+    sock.ws.on("CB:message", (node: BinaryNode) => {
+      const id = node.attrs.id;
+      if (!id) return;
+      if (stanzas.size >= MAX_TRACKED_STANZAS) stanzas.delete(stanzas.keys().next().value as string);
+      stanzas.set(id, node);
+    });
 
     sock.ev.on("creds.update", saveCreds);
 
@@ -279,6 +319,7 @@ export async function createConnection(opts: {
 
     sock.ev.on("messages.upsert", ({ messages }) => {
       const batch = messages ?? [];
+      void rejectUndecryptable(batch);
       const { enqueued } = ingestMessages(db, batch);
       if (enqueued > 0) {
         console.error(`[whatsapp-daemon] ${enqueued} áudio(s) enfileirado(s) para transcrição.`);
