@@ -1,7 +1,7 @@
 import { existsSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DB } from "../shared/migrations.js";
-import type { ImageRef } from "../shared/types.js";
+import type { DocumentRef, ImageRef } from "../shared/types.js";
 
 /**
  * Fetches the bytes of one image. Declared here and implemented in socket.ts, like
@@ -9,6 +9,11 @@ import type { ImageRef } from "../shared/types.js";
  */
 export interface ImageFetcher {
   fetchImage(ref: ImageRef): Promise<Buffer>;
+}
+
+/** Fetches the bytes of one document. Implemented in socket.ts, like ImageFetcher. */
+export interface DocumentFetcher {
+  fetchDocument(ref: DocumentRef): Promise<Buffer>;
 }
 
 /**
@@ -119,4 +124,84 @@ export async function saveImage(
   writeFileSync(part, bytes, { mode: 0o600 });
   renameSync(part, path);
   return { ok: true, image: { path, mimetype, bytes: bytes.length } };
+}
+
+export type SavedDocument = { path: string; mimetype: string; bytes: number; fileName: string | null };
+
+/** The sender picks the file name, so only a plain basename-ish stem survives. */
+function safeStem(fileName: string | null): string {
+  const base = (fileName ?? "").split(/[\\/]/).pop() ?? "";
+  const stem = base.replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._]+/, "").slice(0, 60);
+  return stem;
+}
+
+/** Extension from the mimetype first (the sender's name can lie), name second. */
+function docExt(mimetype: string, fileName: string | null): string {
+  if (mimetype === "application/pdf") return "pdf";
+  const fromName = /\.([A-Za-z0-9]{1,8})$/.exec(fileName ?? "")?.[1];
+  return fromName ? fromName.toLowerCase() : "bin";
+}
+
+/**
+ * Downloads one document to mediaDir and returns where it landed. Same contract as
+ * saveImage: named after the message so a second ask reuses the copy on disk, and
+ * written beside its final name then renamed so a crash never leaves a truncated file.
+ * The sender's file name is kept in the path (after sanitising) so the saved PDF is
+ * recognisable, but the msg_id prefix is what makes it unique.
+ */
+export async function saveDocument(
+  db: DB,
+  fetcher: DocumentFetcher,
+  mediaDir: string,
+  chatJid: string,
+  msgId: string,
+): Promise<{ ok: true; document: SavedDocument } | { ok: false; error: string }> {
+  const row = db
+    .prepare("SELECT type, media_ref FROM messages WHERE chat_jid = ? AND msg_id = ?")
+    .get(chatJid, msgId) as { type: string; media_ref: string | null } | undefined;
+
+  if (!row) return { ok: false, error: `não achei a mensagem ${msgId} em ${chatJid}.` };
+  if (row.type !== "document") return { ok: false, error: `essa mensagem não é um documento (é ${row.type}).` };
+  if (!row.media_ref) {
+    return {
+      ok: false,
+      error:
+        "o daemon não guardou o descritor de mídia desse documento: ele chegou antes de passar a guardar. " +
+          "Só dá para baixar o que chegar daqui para frente; veja no celular.",
+    };
+  }
+
+  let ref: DocumentRef;
+  try {
+    ref = JSON.parse(row.media_ref) as DocumentRef;
+  } catch {
+    return { ok: false, error: "descritor de mídia ilegível." };
+  }
+
+  const mimetype = ref.mimetype.split(";")[0].trim().toLowerCase();
+  const fileName = ref.fileName ?? null;
+  const stem = safeStem(fileName);
+  const id = msgId.replace(/[^A-Za-z0-9_-]/g, "_");
+  const path = join(mediaDir, `${id}${stem ? `_${stem}` : ""}.${docExt(mimetype, fileName)}`);
+
+  if (existsSync(path)) {
+    return { ok: true, document: { path, mimetype, bytes: statSync(path).size, fileName } };
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = await fetcher.fetchDocument(ref);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: /\b(404|410)\b/.test(why) ? "o WhatsApp não serve mais esse documento." : `download falhou: ${why}`,
+    };
+  }
+  if (bytes.length === 0) return { ok: false, error: "download veio vazio." };
+
+  const part = `${path}.part`;
+  writeFileSync(part, bytes, { mode: 0o600 });
+  renameSync(part, path);
+  return { ok: true, document: { path, mimetype, bytes: bytes.length, fileName } };
 }

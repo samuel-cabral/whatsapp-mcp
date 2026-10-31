@@ -1,5 +1,5 @@
 import { normalizeJid, isGroupJid } from "./jid.js";
-import type { AudioRef, ImageRef, MessageRow, MessageType } from "./types.js";
+import type { AudioRef, DocumentRef, ImageRef, MessageRow, MessageType } from "./types.js";
 
 /**
  * Baileys returns timestamps as number, Long, or numeric string depending on the
@@ -139,6 +139,26 @@ export function toImageRef(msg: unknown): ImageRef | null {
     mediaKey,
     directPath,
     mimetype: typeof node.mimetype === "string" ? node.mimetype : "image/jpeg",
+  };
+}
+
+/** The download descriptor for a document, or null for everything else. */
+export function toDocumentRef(msg: unknown): DocumentRef | null {
+  const message = (msg as any)?.message;
+  if (!message) return null;
+
+  const node = unwrap(message)?.documentMessage;
+  if (!node) return null;
+
+  const mediaKey = toBase64(node.mediaKey);
+  const directPath = typeof node.directPath === "string" ? node.directPath : null;
+  if (!mediaKey || !directPath) return null;
+
+  return {
+    mediaKey,
+    directPath,
+    mimetype: typeof node.mimetype === "string" ? node.mimetype : "application/octet-stream",
+    fileName: typeof node.fileName === "string" && node.fileName.trim() !== "" ? node.fileName : null,
   };
 }
 

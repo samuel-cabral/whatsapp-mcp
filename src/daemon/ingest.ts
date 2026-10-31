@@ -1,5 +1,5 @@
 import type { DB } from "../shared/migrations.js";
-import { toAudioRef, toImageRef, toMessageRow } from "../shared/normalize.js";
+import { toAudioRef, toDocumentRef, toImageRef, toMessageRow } from "../shared/normalize.js";
 import { normalizeJid, isGroupJid, isUserJid, lidPair } from "../shared/jid.js";
 
 export interface IngestResult {
@@ -152,6 +152,7 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
       const media =
         row.type === "audio" ? toAudioRef(raw, { anyAudio: true })
         : row.type === "image" ? toImageRef(raw)
+        : row.type === "document" ? toDocumentRef(raw)
         : null;
       if (media) keepMediaRef.run({ ...key, ref: JSON.stringify(media) });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeJid, isGroupJid, isUserJid } from "../src/shared/jid.js";
-import { toAudioRef, toMessageRow } from "../src/shared/normalize.js";
+import { toAudioRef, toDocumentRef, toMessageRow } from "../src/shared/normalize.js";
 
 describe("normalizeJid", () => {
   it("remove o sufixo de device", () => {
@@ -215,5 +215,25 @@ describe("toAudioRef", () => {
     const row = toMessageRow(ptt())!;
     expect(row.type).toBe("audio");
     expect(row.text).toBeNull();
+  });
+});
+
+describe("toDocumentRef", () => {
+  const doc = (node: object, wrap?: string) => {
+    const documentMessage = { mediaKey: new Uint8Array([1, 2]), directPath: "/v/d", mimetype: "application/pdf", fileName: "a.pdf", ...node };
+    return { key: { remoteJid: "5511@s.whatsapp.net", id: "D1" }, message: wrap ? { [wrap]: { message: { documentMessage } } } : { documentMessage } };
+  };
+
+  it("guarda chave, caminho, tipo e nome do arquivo", () => {
+    expect(toDocumentRef(doc({}))).toEqual({ mediaKey: "AQI=", directPath: "/v/d", mimetype: "application/pdf", fileName: "a.pdf" });
+  });
+
+  it("enxerga documento dentro de ephemeralMessage", () => {
+    expect(toDocumentRef(doc({}, "ephemeralMessage"))).not.toBeNull();
+  });
+
+  it("sem mediaKey ou directPath não há o que baixar; não-documento dá null", () => {
+    expect(toDocumentRef(doc({ directPath: undefined }))).toBeNull();
+    expect(toDocumentRef({ message: { conversation: "oi" } })).toBeNull();
   });
 });

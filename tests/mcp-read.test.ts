@@ -35,7 +35,7 @@ describe("tools de leitura", () => {
     const client = await connectClient(db);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
-      "backfill_chat", "confirm_send", "download_image", "draft_message", "get_contact",
+      "backfill_chat", "confirm_send", "download_document", "download_image", "draft_message", "get_contact",
       "list_chats", "read_messages", "search_messages", "transcribe_audio", "whatsapp_status",
     ]);
   });

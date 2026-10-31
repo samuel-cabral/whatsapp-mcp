@@ -96,6 +96,7 @@ async function main(): Promise<void> {
       health: () => conn.health(),
       transcriber: queue ?? undefined,
       images: { fetcher: conn, dir: paths.mediaDir },
+      documents: { fetcher: conn, dir: paths.mediaDir },
     },
   });
 

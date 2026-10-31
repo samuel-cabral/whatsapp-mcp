@@ -5,7 +5,7 @@ import { getSyncStatus } from "../mcp/queries.js";
 import { setMeta } from "./ingest.js";
 import { MAX_BACKFILL_PAGES, type BackfillOutcome } from "../shared/backfill-limits.js";
 import type { DraftStore } from "./drafts.js";
-import { resolveMsgId, saveImage, type ImageFetcher } from "./media.js";
+import { resolveMsgId, saveDocument, saveImage, type DocumentFetcher, type ImageFetcher } from "./media.js";
 
 export interface Sender {
   sendText(jid: string, text: string): Promise<string>;
@@ -37,6 +37,8 @@ export interface ControlDeps {
   transcriber?: Transcriber;
   /** Where download_image saves to, and what fetches the bytes. */
   images?: { fetcher: ImageFetcher; dir: string };
+  /** Same, for download_document. */
+  documents?: { fetcher: DocumentFetcher; dir: string };
 }
 
 const fail = (error: string): ControlResponse => ({ ok: false, error });
@@ -136,6 +138,17 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         if ("error" in id) return fail(id.error);
         const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, c.jid, id.msgId);
         return res.ok ? done(res.image) : fail(res.error);
+      }
+
+      case "download_document": {
+        if (typeof c.jid !== "string" || typeof c.msgId !== "string") {
+          return fail("download_document exige jid e msgId");
+        }
+        if (!deps.documents) return fail("download de documento indisponível neste daemon.");
+        const id = resolveMsgId(deps.db, c.jid, c.msgId);
+        if ("error" in id) return fail(id.error);
+        const res = await saveDocument(deps.db, deps.documents.fetcher, deps.documents.dir, c.jid, id.msgId);
+        return res.ok ? done(res.document) : fail(res.error);
       }
 
       default:
