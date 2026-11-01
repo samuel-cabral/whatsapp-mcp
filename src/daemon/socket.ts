@@ -15,6 +15,7 @@ import {
   ingestChatUpdates,
   ingestContacts,
   ingestGroupSubjects,
+  ingestLidMappings,
   recordHistoryProgress,
   markInboundIngested,
   setMeta,
@@ -27,10 +28,10 @@ import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.
 import type { InboundHealth } from "../shared/health.js";
 import type { Sender } from "./control.js";
 import type { MediaFetcher } from "./audio-queue.js";
-import type { ImageFetcher } from "./media.js";
-import type { AudioRef, ImageRef } from "../shared/types.js";
+import { MAX_DOCUMENT_BYTES, type DocumentFetcher, type ImageFetcher } from "./media.js";
+import type { AudioRef, DocumentRef, ImageRef } from "../shared/types.js";
 
-export interface WhatsAppConnection extends Sender, MediaFetcher, ImageFetcher {
+export interface WhatsAppConnection extends Sender, MediaFetcher, ImageFetcher, DocumentFetcher {
   isConnected(): boolean;
   health(): InboundHealth;
   close(): Promise<void>;
@@ -301,6 +302,9 @@ export async function createConnection(opts: {
     // address book actually lands, and it arrives as a partial — which is why
     // ingestContacts coalesces instead of overwriting with null.
     sock.ev.on("contacts.update", (updates) => ingestContacts(db, updates ?? []));
+    // Fired when someone who reached us as a lid shares their number with us.
+    // Baileys 7 replaced chats.phoneNumberShare ({ lid, jid }) with this ({ lid, pn }).
+    sock.ev.on("lid-mapping.update", ({ lid, pn }) => ingestLidMappings(db, [{ lid, jid: pn }]));
     sock.ev.on("groups.upsert", (groups) => ingestGroupSubjects(db, groups ?? []));
     sock.ev.on("groups.update", (groups) => ingestGroupSubjects(db, groups ?? []));
   };
@@ -357,6 +361,23 @@ export async function createConnection(opts: {
       );
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
+    },
+
+    /** Same path as fetchAudio, for the same reasons. Only the media type differs. */
+    async fetchDocument(ref: DocumentRef): Promise<Buffer> {
+      const stream = await downloadContentFromMessage(
+        { mediaKey: Buffer.from(ref.mediaKey, "base64"), directPath: ref.directPath },
+        "document",
+      );
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of stream) {
+        size += (chunk as Buffer).length;
+        // The declared size can lie; this is the cap that actually protects memory.
+        if (size > MAX_DOCUMENT_BYTES) throw new Error("documento passou do limite de tamanho");
+        chunks.push(chunk as Buffer);
+      }
       return Buffer.concat(chunks);
     },
 

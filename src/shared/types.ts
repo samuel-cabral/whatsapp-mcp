@@ -44,6 +44,20 @@ export interface ImageRef {
   mimetype: string;
 }
 
+/**
+ * What downloadContentFromMessage needs to fetch one document again (PDF, docx, ...).
+ * Same reasoning as ImageRef for leaving out `url` and the hashes. `fileName` is the
+ * sender's label and a hint only: it is sanitised before it ever becomes a path.
+ */
+export interface DocumentRef {
+  mediaKey: string;
+  directPath: string;
+  mimetype: string;
+  fileName: string | null;
+  /** Size the sender declared, when present; lets the daemon refuse before downloading. */
+  fileLength?: number;
+}
+
 export interface ChatRow {
   jid: string;
   name: string | null;
@@ -89,6 +103,7 @@ export type ControlCommand =
   | { cmd: "backfill"; jid: string; pages: number }
   | { cmd: "transcribe"; jid: string; msgId: string; force: boolean }
   | { cmd: "download_image"; jid: string; msgId: string }
+  | { cmd: "download_document"; jid: string; msgId: string }
   | { cmd: "status" };
 
 export type ControlResponse =

@@ -1,11 +1,34 @@
 import type { DB } from "../shared/migrations.js";
-import { toAudioRef, toImageRef, toMessageRow } from "../shared/normalize.js";
-import { normalizeJid, isGroupJid, isUserJid } from "../shared/jid.js";
+import { toAudioRef, toDocumentRef, toImageRef, toMessageRow } from "../shared/normalize.js";
+import { normalizeJid, isGroupJid, isUserJid, lidPair } from "../shared/jid.js";
 
 export interface IngestResult {
   written: number;
   /** Voice notes newly queued for transcription. The caller wakes the worker. */
   enqueued: number;
+}
+
+/**
+ * Records that a lid and a phone number are the same person. The newest evidence
+ * wins: a number can be reassigned, and the server only ever shows a pairing that
+ * is true right now.
+ */
+function lidMapWriter(db: DB): (a: unknown, b: unknown) => void {
+  const stmt = db.prepare(`
+    INSERT INTO lid_map (lid, pn) VALUES (@lid, @pn)
+    ON CONFLICT (lid) DO UPDATE SET pn = excluded.pn
+  `);
+  return (a, b) => {
+    const pair = lidPair(a, b);
+    if (pair) stmt.run(pair);
+  };
+}
+
+export function ingestLidMappings(db: DB, pairs: Array<{ lid?: unknown; jid?: unknown }>): void {
+  const learn = lidMapWriter(db);
+  db.transaction(() => {
+    for (const p of pairs) learn(p?.lid, p?.jid);
+  })();
 }
 
 /**
@@ -81,10 +104,24 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
      WHERE chat_jid = @chat_jid AND msg_id = @msg_id AND media_ref IS NULL
   `);
 
+  const learnLid = lidMapWriter(db);
+
   const run = db.transaction((batch: unknown[]) => {
     let written = 0;
     let enqueued = 0;
     for (const raw of batch) {
+      // Read before toMessageRow can skip the message: a stub or a reaction with no
+      // storable body still carries the sender's other address. Baileys fills
+      // remoteJidAlt (1:1) and participantAlt (group) from the stanza's sender_pn /
+      // sender_lid, which describe whoever sent it. On a message of ours relayed from
+      // another device that is us, while remoteJid is the other person, so pairing
+      // them would map a friend's lid to our own number.
+      const k = (raw as any)?.key;
+      if (k) {
+        if (!k.fromMe) learnLid(k.remoteJid, k.remoteJidAlt);
+        learnLid(k.participant, k.participantAlt);
+      }
+
       const row = toMessageRow(raw);
       if (!row) continue;
       insertMsg.run(row);
@@ -112,6 +149,7 @@ export function ingestMessages(db: DB, messages: unknown[]): IngestResult {
       const media =
         row.type === "audio" ? toAudioRef(raw, { anyAudio: true })
         : row.type === "image" ? toImageRef(raw)
+        : row.type === "document" ? toDocumentRef(raw)
         : null;
       if (media) keepMediaRef.run({ ...key, ref: JSON.stringify(media) });
 
@@ -137,12 +175,17 @@ export function ingestChats(db: DB, chats: unknown[]): number {
       archived = COALESCE(@archived, chats.archived)
   `);
 
+  const learnLid = lidMapWriter(db);
+
   const run = db.transaction((batch: unknown[]) => {
     let n = 0;
     for (const raw of batch) {
       const c = raw as any;
       if (!c?.id) continue;
       const jid = normalizeJid(c.id);
+      // History-sync conversations carry both forms of a 1:1 chat's id.
+      learnLid(c.id, c.pnJid);
+      learnLid(c.id, c.lidJid);
       stmt.run({
         jid,
         name: c.name ?? c.subject ?? null,
@@ -249,11 +292,17 @@ export function ingestContacts(db: DB, contacts: unknown[]): number {
       push_name = COALESCE(excluded.push_name, contacts.push_name)
   `);
 
+  const learnLid = lidMapWriter(db);
+
   const run = db.transaction((batch: unknown[]) => {
     let n = 0;
     for (const raw of batch) {
       const c = raw as any;
       if (!c?.id) continue;
+      // Baileys' Contact has an `id` in either form plus optional `lid` and `phoneNumber`.
+      learnLid(c.id, c.lid);
+      learnLid(c.id, c.phoneNumber);
+      learnLid(c.lid, c.phoneNumber);
       stmt.run({
         jid: normalizeJid(c.id),
         name: c.name ?? c.verifiedName ?? null,

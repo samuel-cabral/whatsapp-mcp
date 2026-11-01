@@ -97,6 +97,18 @@ CREATE TABLE IF NOT EXISTS sync_state (
   complete      INTEGER NOT NULL DEFAULT 0
 );
 
+-- WhatsApp is moving people from their phone number (@s.whatsapp.net) to an
+-- anonymous id (@lid), and the same person can arrive under either. Nothing in the
+-- lid encodes the number, so the only way to join the two is to remember every
+-- pairing the server happens to show us. Chats, messages and contacts keep the jid
+-- they arrived with; the read side folds them together through this table.
+CREATE TABLE IF NOT EXISTS lid_map (
+  lid TEXT PRIMARY KEY,
+  pn  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_lid_map_pn ON lid_map (pn);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT

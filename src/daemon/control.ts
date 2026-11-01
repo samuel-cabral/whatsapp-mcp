@@ -1,11 +1,11 @@
 import type { InboundHealth } from "../shared/health.js";
 import type { DB } from "../shared/migrations.js";
 import type { ControlResponse } from "../shared/types.js";
-import { getSyncStatus } from "../mcp/queries.js";
+import { aliasesOf, getSyncStatus } from "../mcp/queries.js";
 import { setMeta } from "./ingest.js";
 import { MAX_BACKFILL_PAGES, type BackfillOutcome } from "../shared/backfill-limits.js";
 import type { DraftStore } from "./drafts.js";
-import { resolveMsgId, saveImage, type ImageFetcher } from "./media.js";
+import { resolveMsgId, saveDocument, saveImage, type DocumentFetcher, type ImageFetcher } from "./media.js";
 
 export interface Sender {
   sendText(jid: string, text: string): Promise<string>;
@@ -37,20 +37,27 @@ export interface ControlDeps {
   transcriber?: Transcriber;
   /** Where download_image saves to, and what fetches the bytes. */
   images?: { fetcher: ImageFetcher; dir: string };
+  /** Same, for download_document. */
+  documents?: { fetcher: DocumentFetcher; dir: string };
 }
 
 const fail = (error: string): ControlResponse => ({ ok: false, error });
 const done = (result: unknown): ControlResponse => ({ ok: true, result });
 
 function chatName(db: DB, jid: string): string | null | undefined {
+  // get_contact hands out the phone-number jid, but the chat may be filed under the
+  // person's lid. Accept any alias, and prefer the row that actually has a name.
+  const aliases = JSON.stringify(aliasesOf(db, jid));
   const row = db
     .prepare(`
       SELECT COALESCE(c.name, ct.name, ct.push_name) AS name
         FROM chats c
         LEFT JOIN contacts ct ON ct.jid = c.jid
-       WHERE c.jid = ?
+       WHERE c.jid IN (SELECT value FROM json_each(?))
+       ORDER BY (COALESCE(c.name, ct.name, ct.push_name) IS NOT NULL) DESC
+       LIMIT 1
     `)
-    .get(jid) as { name: string | null } | undefined;
+    .get(aliases) as { name: string | null } | undefined;
   return row ? row.name : undefined;
 }
 
@@ -122,7 +129,7 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         }
         const id = resolveMsgId(deps.db, c.jid, c.msgId);
         if ("error" in id) return fail(id.error);
-        const res = await deps.transcriber.request(c.jid, id.msgId, c.force === true);
+        const res = await deps.transcriber.request(id.chatJid, id.msgId, c.force === true);
         if (res.state === "rejected") return fail(res.error);
         return done(res);
       }
@@ -134,8 +141,19 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         if (!deps.images) return fail("download de imagem indisponível neste daemon.");
         const id = resolveMsgId(deps.db, c.jid, c.msgId);
         if ("error" in id) return fail(id.error);
-        const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, c.jid, id.msgId);
+        const res = await saveImage(deps.db, deps.images.fetcher, deps.images.dir, id.chatJid, id.msgId);
         return res.ok ? done(res.image) : fail(res.error);
+      }
+
+      case "download_document": {
+        if (typeof c.jid !== "string" || typeof c.msgId !== "string") {
+          return fail("download_document exige jid e msgId");
+        }
+        if (!deps.documents) return fail("download de documento indisponível neste daemon.");
+        const id = resolveMsgId(deps.db, c.jid, c.msgId);
+        if ("error" in id) return fail(id.error);
+        const res = await saveDocument(deps.db, deps.documents.fetcher, deps.documents.dir, id.chatJid, id.msgId);
+        return res.ok ? done(res.document) : fail(res.error);
       }
 
       default:

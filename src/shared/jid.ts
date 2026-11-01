@@ -10,6 +10,20 @@ export function normalizeJid(jid: string): string {
   return `${bare}@${server}`;
 }
 
+/**
+ * Two jids the server says are the same person, reduced to a lid_map row. Any pair
+ * that is not exactly one @lid and one phone-number jid is not evidence of anything
+ * and yields null — the same field can hold a group, a broadcast or nothing at all.
+ */
+export function lidPair(a: unknown, b: unknown): { lid: string; pn: string } | null {
+  if (typeof a !== "string" || typeof b !== "string") return null;
+  const x = normalizeJid(a);
+  const y = normalizeJid(b);
+  if (x.endsWith("@lid") && y.endsWith("@s.whatsapp.net")) return { lid: x, pn: y };
+  if (y.endsWith("@lid") && x.endsWith("@s.whatsapp.net")) return { lid: y, pn: x };
+  return null;
+}
+
 export function isGroupJid(jid: string): boolean {
   return jid.endsWith("@g.us");
 }
