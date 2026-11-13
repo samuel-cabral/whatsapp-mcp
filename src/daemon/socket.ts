@@ -26,7 +26,7 @@ import { normalizeJid } from "../shared/jid.js";
 import { makeTtlCache } from "../shared/ttl-cache.js";
 import { InboundHealthTracker, SessionRepairQueue, tallyUpsert } from "./health.js";
 import type { InboundHealth } from "../shared/health.js";
-import type { Sender } from "./control.js";
+import type { ReactionKey, Sender } from "./control.js";
 import type { MediaFetcher } from "./audio-queue.js";
 import { MAX_DOCUMENT_BYTES, type DocumentFetcher, type ImageFetcher } from "./media.js";
 import type { AudioRef, DocumentRef, ImageRef } from "../shared/types.js";
@@ -319,6 +319,15 @@ export async function createConnection(opts: {
       const sent = await sock.sendMessage(jid, { text });
       if (sent) ingestMessages(db, [sent]);
       return sent?.key?.id ?? "";
+    },
+
+    async sendReaction(chatJid: string, key: ReactionKey, emoji: string): Promise<void> {
+      await sock.sendMessage(chatJid, {
+        react: {
+          text: emoji,
+          key: { remoteJid: chatJid, id: key.id, fromMe: key.fromMe, participant: key.participant },
+        },
+      });
     },
 
     /**

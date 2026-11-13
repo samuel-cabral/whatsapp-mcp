@@ -104,6 +104,7 @@ export type ControlCommand =
   | { cmd: "transcribe"; jid: string; msgId: string; force: boolean }
   | { cmd: "download_image"; jid: string; msgId: string }
   | { cmd: "download_document"; jid: string; msgId: string }
+  | { cmd: "react"; jid: string; msgId: string; emoji: string }
   | { cmd: "status" };
 
 export type ControlResponse =

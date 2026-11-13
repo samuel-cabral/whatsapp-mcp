@@ -249,3 +249,53 @@ describe("comando transcribe", () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+
+describe("handleCommand — react", () => {
+  const GROUP = "120363@g.us";
+  const AUTHOR = "5585888@s.whatsapp.net";
+  let sendReaction: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    sendReaction = vi.fn(async () => undefined);
+    deps.sender = { ...deps.sender, sendReaction };
+    db.prepare("INSERT INTO chats (jid, name) VALUES (?, ?)").run(GROUP, "Grupo");
+    const ins = db.prepare(
+      "INSERT INTO messages (chat_jid, msg_id, sender_jid, from_me, timestamp, type, text) VALUES (?, ?, ?, ?, ?, 'text', 'x')",
+    );
+    ins.run(GROUP, "GMSG1", AUTHOR, 0, 1);
+    ins.run(GROUP, "GMINE1", null, 1, 2);
+    ins.run(IGOR, "DMSG1", IGOR, 0, 3);
+  });
+
+  it("em grupo, usa o autor guardado como participant", async () => {
+    const res = await handleCommand({ cmd: "react", jid: GROUP, msgId: "GMSG1", emoji: "🙏" }, deps);
+    expect(res.ok).toBe(true);
+    expect(sendReaction).toHaveBeenCalledWith(GROUP, { id: "GMSG1", fromMe: false, participant: AUTHOR }, "🙏");
+  });
+
+  it("em conversa 1:1 não manda participant", async () => {
+    await handleCommand({ cmd: "react", jid: IGOR, msgId: "DMSG1", emoji: "🙏" }, deps);
+    expect(sendReaction).toHaveBeenCalledWith(IGOR, { id: "DMSG1", fromMe: false, participant: undefined }, "🙏");
+  });
+
+  it("mensagem minha em grupo: fromMe true, sem participant", async () => {
+    await handleCommand({ cmd: "react", jid: GROUP, msgId: "GMINE1", emoji: "❤️" }, deps);
+    expect(sendReaction).toHaveBeenCalledWith(GROUP, { id: "GMINE1", fromMe: true, participant: undefined }, "❤️");
+  });
+
+  it("recusa texto que não é um único emoji", async () => {
+    for (const emoji of ["oi", "🙏🙏", "a🙏"]) {
+      const res = await handleCommand({ cmd: "react", jid: GROUP, msgId: "GMSG1", emoji }, deps);
+      expect(res.ok).toBe(false);
+    }
+    expect(sendReaction).not.toHaveBeenCalled();
+  });
+
+  it("recusa mensagem inexistente e desconectado", async () => {
+    expect((await handleCommand({ cmd: "react", jid: GROUP, msgId: "NAOEXISTE1", emoji: "🙏" }, deps)).ok).toBe(false);
+    deps.connected = () => false;
+    expect((await handleCommand({ cmd: "react", jid: GROUP, msgId: "GMSG1", emoji: "🙏" }, deps)).ok).toBe(false);
+    expect(sendReaction).not.toHaveBeenCalled();
+  });
+});

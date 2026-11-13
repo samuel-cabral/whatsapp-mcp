@@ -10,6 +10,24 @@ import { resolveMsgId, saveDocument, saveImage, type DocumentFetcher, type Image
 export interface Sender {
   sendText(jid: string, text: string): Promise<string>;
   fetchOlder(jid: string, pages: number): Promise<BackfillOutcome>;
+  /** Optional so a transport without reactions still satisfies Sender. */
+  sendReaction?(chatJid: string, key: ReactionKey, emoji: string): Promise<void>;
+}
+
+/** What WhatsApp needs to know to attach a reaction to one specific message. */
+export interface ReactionKey {
+  id: string;
+  fromMe: boolean;
+  /** The author inside a group; absent in 1:1 chats. */
+  participant?: string;
+}
+
+/** A reaction is one emoji (possibly with a skin tone or ZWJ sequence), or empty to remove it. */
+export function isSingleEmoji(s: string): boolean {
+  if (s === "") return true;
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const parts = [...seg.segment(s)];
+  return parts.length === 1 && /\p{Extended_Pictographic}/u.test(s);
 }
 
 /**
@@ -104,6 +122,34 @@ export async function handleCommand(cmd: unknown, deps: ControlDeps): Promise<Co
         }
         const msgId = await deps.sender.sendText(draft.jid, draft.text);
         return done({ sent: true, msgId, jid: draft.jid });
+      }
+
+      case "react": {
+        if (typeof c.jid !== "string" || typeof c.msgId !== "string" || typeof c.emoji !== "string") {
+          return fail("react exige jid, msgId e emoji");
+        }
+        if (!isSingleEmoji(c.emoji)) return fail("emoji inválido: passe um único emoji (ou vazio para remover).");
+        if (!deps.sender.sendReaction) return fail("reação indisponível neste daemon.");
+        if (!deps.connected()) return fail("WhatsApp desconectado — a reação não foi enviada.");
+        // Same rule as the media tools: resolve through every alias of the chat, and
+        // read from_me/sender from the stored row so the caller cannot forge the key.
+        const id = resolveMsgId(deps.db, c.jid, c.msgId);
+        if ("error" in id) return fail(id.error);
+        const row = deps.db
+          .prepare("SELECT from_me, sender_jid FROM messages WHERE chat_jid = ? AND msg_id = ? LIMIT 1")
+          .get(id.chatJid, id.msgId) as { from_me: number; sender_jid: string | null } | undefined;
+        if (!row) return fail(`não achei a mensagem ${c.msgId} em ${c.jid}.`);
+        const fromMe = row.from_me === 1;
+        const isGroup = id.chatJid.endsWith("@g.us");
+        if (isGroup && !fromMe && !row.sender_jid) {
+          return fail("não sei quem enviou essa mensagem do grupo; sem isso a reação iria para a mensagem errada.");
+        }
+        await deps.sender.sendReaction(
+          id.chatJid,
+          { id: id.msgId, fromMe, participant: isGroup && !fromMe ? row.sender_jid! : undefined },
+          c.emoji,
+        );
+        return done({ reacted: true, jid: id.chatJid, msgId: id.msgId, emoji: c.emoji });
       }
 
       case "backfill": {
