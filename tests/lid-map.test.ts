@@ -5,8 +5,8 @@ import { ingestMessages, ingestChats, ingestContacts, ingestLidMappings } from "
 import { listChats, readMessages, searchMessages, getContact } from "../src/mcp/queries.js";
 import { lidPair } from "../src/shared/jid.js";
 
-const PN = "558592902175@s.whatsapp.net";
-const LID = "75265074045127@lid";
+const PN = "5511988887777@s.whatsapp.net";
+const LID = "10000000000001@lid";
 const OUTRO = "5511999@s.whatsapp.net";
 
 let db: DB;
@@ -19,7 +19,7 @@ const lidMap = () => db.prepare("SELECT lid, pn FROM lid_map ORDER BY lid").all(
 
 describe("lidPair", () => {
   it("aceita um lid e um número em qualquer ordem, sem sufixo de dispositivo", () => {
-    expect(lidPair("75265074045127:3@lid", PN)).toEqual({ lid: LID, pn: PN });
+    expect(lidPair("10000000000001:3@lid", PN)).toEqual({ lid: LID, pn: PN });
     expect(lidPair(PN, LID)).toEqual({ lid: LID, pn: PN });
   });
 
