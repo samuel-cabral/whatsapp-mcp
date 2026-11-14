@@ -25,6 +25,12 @@ export function renderBody(m: Renderable): string {
     const tag = `(imagem, id ${shortId(m.id)})`;
     return m.text ? `${tag} ${m.text}` : tag;
   }
+  // Same for a document: its text is the caption or the file name, which alone reads
+  // like a message and hides that download_document can fetch the file.
+  if (m.type === "document") {
+    const tag = `(documento, id ${shortId(m.id)})`;
+    return m.text ? `${tag} ${m.text}` : tag;
+  }
   if (m.text !== null && m.text !== "") return m.text;
   if (m.type !== "audio") return `(${m.type})`;
 

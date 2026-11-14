@@ -31,12 +31,12 @@ function textOf(res: any): string {
 }
 
 describe("tools de leitura", () => {
-  it("expõe as dez tools", async () => {
+  it("expõe as doze tools", async () => {
     const client = await connectClient(db);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
-      "backfill_chat", "confirm_send", "download_image", "draft_message", "get_contact",
-      "list_chats", "read_messages", "search_messages", "transcribe_audio", "whatsapp_status",
+      "backfill_chat", "confirm_send", "download_document", "download_image", "draft_message", "get_contact",
+      "list_chats", "react_message", "read_messages", "search_messages", "transcribe_audio", "whatsapp_status",
     ]);
   });
 

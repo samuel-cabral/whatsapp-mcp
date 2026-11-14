@@ -124,6 +124,23 @@ describe("transcribe_audio", () => {
   });
 });
 
+describe("download_document", () => {
+  it("devolve o caminho salvo", async () => {
+    const client = await connectWith(async (cmd) => {
+      expect(cmd).toEqual({ cmd: "download_document", jid: IGOR, msgId: "D1" });
+      return { ok: true, result: { path: "/x/D1_a.pdf", mimetype: "application/pdf", bytes: 2048, fileName: "a.pdf" } };
+    });
+    const res: any = await client.callTool({ name: "download_document", arguments: { jid: IGOR, msgId: "D1" } });
+    expect(textOf(res)).toContain("/x/D1_a.pdf");
+  });
+
+  it("repassa a recusa do daemon", async () => {
+    const client = await connectWith(async () => ({ ok: false, error: "essa mensagem não é um documento (é text)." }));
+    const res: any = await client.callTool({ name: "download_document", arguments: { jid: IGOR, msgId: "T1" } });
+    expect(textOf(res)).toContain("não é um documento");
+  });
+});
+
 describe("download_image", () => {
   it("devolve a imagem para o modelo ver e diz onde salvou", async () => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");

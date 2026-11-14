@@ -5,7 +5,7 @@ import type BetterSqlite3 from "better-sqlite3";
 
 export type DB = BetterSqlite3.Database;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -95,8 +95,40 @@ const STEP_002: Step = {
   },
 };
 
+/**
+ * v2 → v3: lid_map, seeded from what the store already proves.
+ *
+ * Before this existed the daemon threw away every lid↔number pairing it was shown,
+ * so the only evidence left is indirect: a history replay can deliver the same
+ * message once under the lid chat and once under the number chat, and a msg_id is
+ * unique per message. A lid whose messages also sit in exactly one number chat is
+ * that person. A lid that overlaps two number chats is ambiguous (in practice it is
+ * our own lid, which shows up in every self-chat) and is left for live events.
+ */
+const STEP_003: Step = {
+  version: 3,
+  up(db: DB): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_lid_map_pn ON lid_map (pn);
+    `);
+    if (!tableExists(db, "messages")) return;
+
+    db.exec(`
+      INSERT OR IGNORE INTO lid_map (lid, pn)
+      SELECT lid, MIN(pn) FROM (
+        SELECT DISTINCT l.chat_jid AS lid, p.chat_jid AS pn
+          FROM messages l
+          JOIN messages p ON p.msg_id = l.msg_id AND p.chat_jid LIKE '%@s.whatsapp.net'
+         WHERE l.chat_jid LIKE '%@lid'
+      )
+      GROUP BY lid HAVING COUNT(*) = 1
+    `);
+  },
+};
+
 /** Kept in ascending order; the loop in migrate relies on it. */
-const STEPS: Step[] = [STEP_002];
+const STEPS: Step[] = [STEP_002, STEP_003];
 
 /**
  * Order matters and is not obvious: `meta` first, then the numbered steps, then

@@ -37,6 +37,19 @@ export function registerWriteTools(server: McpServer, ctx: ToolContext): void {
   );
 
   server.tool(
+    "react_message",
+    "Reage com um emoji a uma mensagem específica (ex.: 🙏). Use o id que a leitura mostra; o id cortado serve " +
+      "para mídia, mas para reagir prefira o id completo. Emoji vazio remove a reação. Só reaja quando o usuário pediu.",
+    { jid: z.string(), msgId: z.string(), emoji: z.string() },
+    async ({ jid, msgId, emoji }) => {
+      const res = await ctx.client.send({ cmd: "react", jid, msgId, emoji });
+      if (!res.ok) return text(`Reação não enviada: ${res.error}`);
+      const r = res.result as any;
+      return text(`Reação ${r.emoji || "(removida)"} enviada na mensagem ${r.msgId} de ${r.jid}.`);
+    },
+  );
+
+  server.tool(
     "backfill_chat",
     `Puxa histórico mais antigo de uma conversa, ${PAGE_SIZE} mensagens por página. Use quando uma busca parecer incompleta.`,
     { jid: z.string(), pages: z.number().int().min(1).max(MAX_BACKFILL_PAGES).optional() },
@@ -110,6 +123,22 @@ export function registerWriteTools(server: McpServer, ctx: ToolContext): void {
           { type: "text" as const, text: saved },
         ],
       };
+    },
+  );
+
+  server.tool(
+    "download_document",
+    "Baixa um documento (PDF, docx...) de uma conversa e salva em ~/.whatsapp-mcp/media; devolve o caminho do arquivo. " +
+      "Use com o id que a leitura mostra em (documento, id …); o id cortado serve. " +
+      "Para ler um PDF, abra o caminho devolvido com o Read.",
+    { jid: z.string(), msgId: z.string() },
+    async ({ jid, msgId }) => {
+      const res = await ctx.client.send({ cmd: "download_document", jid, msgId });
+      if (!res.ok) return text(`Documento não baixado: ${res.error}`);
+
+      const r = res.result as { path: string; mimetype: string; bytes: number; fileName: string | null };
+      const label = r.fileName ? `"${r.fileName}" ` : "";
+      return text(`Documento ${label}salvo em ${r.path} (${Math.round(r.bytes / 1024)} KB, ${r.mimetype}).`);
     },
   );
 }
